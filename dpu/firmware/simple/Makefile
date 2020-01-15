@@ -1,0 +1,21 @@
+CC           = dpu-upmem-dpurte-clang
+CFLAGS       = -O2 -flto -g -fstack-size-section -Wall -Wextra -Werror -DSTACK_SIZE_DEFAULT=4096
+
+COMMON_SOURCES     = common/dpu_alloc.c
+COMMON_INCLUDES    = -Icommon
+DECOMPRESS_SOURCES = $(COMMON_SOURCES) decompress/dpu_task.c decompress/zstd_decompress.c
+DECOMPRESS_INCLUDES = $(COMMON_INCLUDES) -Idecompress
+DECOMPRESS_PROGRAM = decompress.dpu
+
+.PHONY: default all clean
+
+default: all
+
+all: $(DECOMPRESS_PROGRAM)
+
+clean:
+	$(RM) $(DECOMPRESS_PROGRAM)
+
+$(DECOMPRESS_PROGRAM): $(DECOMPRESS_SOURCES)
+	$(CC) $(CFLAGS) $(DECOMPRESS_INCLUDES) $^ -o $@
+

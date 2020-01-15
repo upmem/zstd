@@ -1,0 +1,61 @@
+CC           = dpu-upmem-dpurte-clang
+CFLAGS       = -Oz -flto -g -fstack-size-section -Wall -Wextra -Werror
+
+COMMON_FILES := $(sort $(wildcard common/*.c))
+ALLOC_FILES := $(sort $(wildcard alloc/*.c))
+COMMON_INCLUDES := -Ialloc/ -Icommon/
+DECOMPRESS_FILES := $(sort $(wildcard decompress/*.c))
+DECOMPRESS_FILES += dpu_decompress.c
+DECOMPRESS_INCLUDES := -Idecompress/
+
+FILES = $(ALLOC_FILES) $(COMMON_FILES) $(DECOMPRESS_FILES)
+CFLAGS += -I. $(COMMON_INCLUDES) $(DECOMPRESS_INCLUDES)
+
+HUF_FORCE_DECOMPRESS_X1 ?= 1
+HUF_FORCE_DECOMPRESS_X2 ?= 0
+ZSTD_FORCE_DECOMPRESS_SHORT ?= 1
+ZSTD_FORCE_DECOMPRESS_LONG ?= 0
+ZSTD_NO_INLINE ?= 1
+ZSTD_STRIP_ERROR_STRINGS ?= 1
+
+DECOMPRESS_PROGRAM = decompress.dpu
+
+ifneq ($(HUF_FORCE_DECOMPRESS_X1), 0)
+	CFLAGS += -DHUF_FORCE_DECOMPRESS_X1
+endif
+
+ifneq ($(HUF_FORCE_DECOMPRESS_X2), 0)
+	CFLAGS += -DHUF_FORCE_DECOMPRESS_X2
+endif
+
+ifneq ($(ZSTD_FORCE_DECOMPRESS_SHORT), 0)
+	CFLAGS += -DZSTD_FORCE_DECOMPRESS_SHORT
+endif
+
+ifneq ($(ZSTD_FORCE_DECOMPRESS_LONG), 0)
+	CFLAGS += -DZSTD_FORCE_DECOMPRESS_LONG
+endif
+
+ifneq ($(ZSTD_NO_INLINE), 0)
+	CFLAGS += -DZSTD_NO_INLINE
+endif
+
+ifneq ($(ZSTD_STRIP_ERROR_STRINGS), 0)
+	CFLAGS += -DZSTD_STRIP_ERROR_STRINGS
+endif
+
+CFLAGS += -DNO_PREFETCH
+CFLAGS += -DZSTD_HEAPMODE=1
+
+.PHONY: default all clean
+
+default: all
+
+all: $(DECOMPRESS_PROGRAM)
+
+clean:
+	$(RM) $(DECOMPRESS_PROGRAM)
+
+$(DECOMPRESS_PROGRAM): CFLAGS += -DSTACK_SIZE_TASKLET_0=8192
+$(DECOMPRESS_PROGRAM): $(FILES)
+	$(CC) $(CFLAGS) $^ -o $@
