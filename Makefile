@@ -87,6 +87,10 @@ automated_benchmarking:
 .PHONY: benchmarking
 benchmarking: automated_benchmarking
 
+.PHONY: dpu
+dpu:
+	$(MAKE) -C dpu/
+
 ## examples: build all examples in `/examples` directory
 .PHONY: examples
 examples: lib
@@ -120,6 +124,7 @@ clean:
 	@$(MAKE) -C $(PRGDIR) $@ > $(VOID)
 	@$(MAKE) -C $(TESTDIR) $@ > $(VOID)
 	@$(MAKE) -C $(ZWRAPDIR) $@ > $(VOID)
+	@$(MAKE) -C dpu/ $@ > $(VOID)
 	@$(MAKE) -C examples/ $@ > $(VOID)
 	@$(MAKE) -C contrib/gen_html $@ > $(VOID)
 	@$(MAKE) -C contrib/pzstd $@ > $(VOID)
