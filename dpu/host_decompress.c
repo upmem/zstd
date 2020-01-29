@@ -4,7 +4,9 @@
 #include <stdio.h>
 #include <zstd.h>
 
-#define DPU_DECOMPRESS_PROGRAM "firmware/complete/decompress.dpu"
+#ifndef DPU_DECOMPRESS_PROGRAM
+#error DPU_DECOMPRESS_PROGRAM is not defined
+#endif
 
 static uint32_t compress(const uint8_t* src, uint32_t src_size, uint8_t* dst);
 static uint32_t DPU_decompress(const uint8_t* src, uint32_t src_size, uint8_t* dst);
@@ -84,6 +86,11 @@ static uint32_t DPU_decompress(const uint8_t* src, uint32_t src_size, uint8_t* d
     }
     
     DPU_ASSERT(dpu_copy_from(dpu, "output", 0, dst, (res_size + 3) & ~3));
+    uint64_t cycles;
+    DPU_ASSERT(dpu_copy_from(dpu, "cycles", 0, &cycles, sizeof(cycles)));
+    printf("input  size: %8d B\n", src_size);
+    printf("output size: %8d B\n", res_size);
+    printf("duration   : %8ld cycles\n", cycles);
 
     DPU_ASSERT(dpu_free(dpus));
 
