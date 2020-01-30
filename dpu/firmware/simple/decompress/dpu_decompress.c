@@ -354,18 +354,19 @@ static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in
 
     MRAM_READ(input, input_cache, MRAM_CACHE_SIZE);
     input_idx += MRAM_CACHE_SIZE;
-    while (remaining >= MRAM_CACHE_SIZE) {
+
+    while (remaining != 0) {
         if (output_offset > input_offset) {
-            size_t part = MRAM_CACHE_SIZE - output_offset;
+            size_t part = MIN(remaining, MRAM_CACHE_SIZE - output_offset);
             memcpy(output_cache + output_offset, input_cache + input_offset, part);
             MRAM_WRITE(output_cache, output + output_idx, MRAM_CACHE_SIZE);
 
-            remaining -= MRAM_CACHE_SIZE;
+            remaining -= part;
             output_idx += MRAM_CACHE_SIZE;
             input_offset += part;
             output_offset = 0;
         } else if (output_offset < input_offset) {
-            size_t part = MRAM_CACHE_SIZE - input_offset;
+            size_t part = MIN(remaining, MRAM_CACHE_SIZE - input_offset);
             memcpy(output_cache + output_offset, input_cache + input_offset, part);
             MRAM_READ(input + input_idx, input_cache, MRAM_CACHE_SIZE);
 
@@ -374,25 +375,17 @@ static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in
             input_offset = 0;
         } else {
             // TODO (optimization) we should handle this case outside the while loop
-            size_t part = MRAM_CACHE_SIZE - input_offset;
+            size_t part = MIN(remaining, MRAM_CACHE_SIZE - input_offset);
             memcpy(output_cache + output_offset, input_cache + input_offset, part);
             MRAM_WRITE(output_cache, output + output_idx, MRAM_CACHE_SIZE);
             MRAM_READ(input + input_idx, input_cache, MRAM_CACHE_SIZE);
 
-            remaining -= MRAM_CACHE_SIZE;
+            remaining -= part;
             output_idx += MRAM_CACHE_SIZE;
             input_idx += MRAM_CACHE_SIZE;
             output_offset = 0;
             input_offset = 0;
         }
-    }
-
-    if (remaining != 0) {
-        if (output_idx != 0) {
-            MRAM_READ(output + output_idx, output_cache, MRAM_CACHE_SIZE);
-        }
-        memcpy(output_cache + output_offset, input_cache + input_offset, remaining);
-        MRAM_WRITE(output_cache, output + output_idx, MRAM_CACHE_SIZE);
     }
 
     in->ptr += len;
