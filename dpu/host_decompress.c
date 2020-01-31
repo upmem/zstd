@@ -1,4 +1,5 @@
 #include <dpu.h>
+#include <dpu_log.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,26 +9,22 @@
 #error DPU_DECOMPRESS_PROGRAM is not defined
 #endif
 
-static uint32_t compress(const uint8_t* src, uint32_t src_size, uint8_t* dst);
 static uint32_t DPU_decompress(const uint8_t* src, uint32_t src_size, uint8_t* dst);
 
-#define SRC_SIZE (1 << 10)
-#define TMP_SIZE (1 << 10)
-#define DST_SIZE (1 << 10)
+#define SRC_SIZE (1 << 20)
+#define DST_SIZE (1 << 20)
 
 static uint8_t src[SRC_SIZE];
-static uint8_t tmp[TMP_SIZE];
 static uint8_t dst[DST_SIZE];
 
 int main(int argc, char **argv) {
-    if (argc != 4) {
-        fprintf(stderr, "usage: %s <input> <compressed> <decompressed>\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "usage: %s <compressed> <decompressed>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     char* input = argv[1];
-    char* compressed = argv[2];
-    char* output = argv[3];
+    char* output = argv[2];
 
     FILE *fin = fopen(input, "r");
 
@@ -43,23 +40,13 @@ int main(int argc, char **argv) {
     fread(src, sizeof(*src), input_size, fin);
     fclose(fin);
 
-    uint32_t compressed_size = compress(src, input_size, tmp);
-
-    FILE *ftmp = fopen(compressed, "w");
-    fwrite(tmp, sizeof(*tmp), compressed_size, ftmp);
-    fclose(ftmp);
-
-    uint32_t res_size = DPU_decompress(tmp, compressed_size, dst);
+    uint32_t res_size = DPU_decompress(src, input_size, dst);
 
     FILE *fout = fopen(output, "w");
     fwrite(dst, sizeof(*dst), res_size, fout);
     fclose(fout);
 
     return EXIT_SUCCESS;
-}
-
-static uint32_t compress(const uint8_t* src, uint32_t src_size, uint8_t* dst) {
-   return ZSTD_compress(dst, TMP_SIZE, src, src_size, ZSTD_greedy); 
 }
 
 static uint32_t DPU_decompress(const uint8_t* src, uint32_t src_size, uint8_t* dst) {
@@ -76,7 +63,12 @@ static uint32_t DPU_decompress(const uint8_t* src, uint32_t src_size, uint8_t* d
     DPU_ASSERT(dpu_load(dpu, DPU_DECOMPRESS_PROGRAM, NULL));
     DPU_ASSERT(dpu_copy_to(dpu, "inputSize", 0, &src_size, sizeof(src_size)));
     DPU_ASSERT(dpu_copy_to(dpu, "input", 0, src, (src_size + 3) & ~3));
-    DPU_ASSERT(dpu_launch(dpu, DPU_SYNCHRONOUS));
+    dpu_error_t err = dpu_launch(dpu, DPU_SYNCHRONOUS);
+    DPU_ASSERT(dpu_log_read(dpu, stdout));
+    if (err != DPU_OK) {
+        fprintf(stderr, "%s:%d(%s): DPU Error: %s\n", __FILE__, __LINE__, __func__, dpu_error_to_string(err));
+        exit(EXIT_FAILURE);
+    }
 
     DPU_ASSERT(dpu_copy_from(dpu, "resultSize", 0, &res_size, sizeof(res_size)));
         

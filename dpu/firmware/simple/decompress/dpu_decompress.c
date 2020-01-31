@@ -17,7 +17,7 @@
 #define FSE_MAX_ACCURACY_LOG (15)
 #define FSE_USED_ACCURACY_LOG (7)
 #define FSE_MAX_SYMBS (256)
-#define FSE_MAX_SIZE (1 << FSE_USED_ACCURACY_LOG)
+#define FSE_MAX_SIZE (1 << ((FSE_USED_ACCURACY_LOG > 9) ? FSE_USED_ACCURACY_LOG : 9))
 
 #define FSE_NR_TABLES (4)
 #define FSE_LITERALS_TABLE_IDX (0)
@@ -192,12 +192,11 @@ static const u8 SEQ_MAX_CODES[3] = { 35, (u8)-1, 52 };
 
 static inline i32 highest_set_bit(const u64 num)
 {
-    for (i32 i = 63; i >= 0; --i) {
-        if (((u64)1 << i) <= num) {
-            return i;
-        }
+    if (unlikely(num == 0)) {
+        return -1;
     }
-    return -1;
+
+    return 63 - __builtin_clzl(num);
 }
 
 static inline const mram(u8 *) MRAM_get_read_ptr(mram_istream_t *const in, size_t len)
@@ -305,7 +304,7 @@ static inline void MRAM_rewind_bits(mram_istream_t *const in, const u8 num_bits)
     const i32 bytes = -(new_offset - 7) / 8;
 
     in->ptr -= bytes;
-    in->ptr += bytes;
+    in->len += bytes;
     in->bit_offset = ((new_offset % 8) + 8) % 8;
 }
 static inline void MRAM_write_byte(mram_ostream_t *const out, u8 symb)
@@ -817,8 +816,8 @@ static void FSE_decode_header(FSE_dtable_t *const dtable, mram_istream_t *const 
     i32 remaining = 1 << accuracy_log;
     i16 frequencies[FSE_MAX_SYMBS];
 
-    u16 symb = 0;
-    while (remaining > 0) {
+    i32 symb = 0;
+    while (remaining > 0 && symb < FSE_MAX_SYMBS) {
         const u8 num_bits = highest_set_bit(remaining + 1) + 1;
         u16 val = MRAM_read_bits(in, num_bits);
         const u16 lower_mask = ((u16)1 << (num_bits - 1)) - 1;

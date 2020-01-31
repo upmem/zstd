@@ -28,8 +28,8 @@ __host uint64_t cycles;
 __host uint8_t input[INPUT_SIZE];
 __host uint8_t output[OUTPUT_SIZE];
 #else
-__mram uint8_t input[INPUT_SIZE];
-__mram uint8_t output[OUTPUT_SIZE];
+__mram_noinit uint8_t input[INPUT_SIZE];
+__mram_noinit uint8_t output[OUTPUT_SIZE];
 #endif
 
 int main() {

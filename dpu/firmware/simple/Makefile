@@ -1,6 +1,6 @@
 CC           = dpu-upmem-dpurte-clang
 NR_TASKLETS  = 1
-CFLAGS       = -Oz -flto -g -fstack-size-section -Wall -Wextra -Werror -DNR_TASKLETS=$(NR_TASKLETS) -DSTACK_SIZE_DEFAULT=4096
+CFLAGS       = -Oz -flto -Wall -Wextra -Werror -DNR_TASKLETS=$(NR_TASKLETS) -DSTACK_SIZE_DEFAULT=4096
 
 COMMON_SOURCES     = common/dpu_alloc.c
 COMMON_INCLUDES    = -Icommon
