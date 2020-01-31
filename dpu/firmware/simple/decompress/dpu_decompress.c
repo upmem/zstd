@@ -348,17 +348,17 @@ static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in
     size_t remaining = len;
 
     if (output_offset != 0) {
-        MRAM_READ(output, output_cache, MRAM_CACHE_SIZE);
+        mram_read(output, output_cache, MRAM_CACHE_SIZE);
     }
 
-    MRAM_READ(input, input_cache, MRAM_CACHE_SIZE);
+    mram_read(input, input_cache, MRAM_CACHE_SIZE);
     input_idx += MRAM_CACHE_SIZE;
 
     while (remaining != 0) {
         if (output_offset > input_offset) {
             size_t part = MIN(remaining, MRAM_CACHE_SIZE - output_offset);
             memcpy(output_cache + output_offset, input_cache + input_offset, part);
-            MRAM_WRITE(output_cache, output + output_idx, MRAM_CACHE_SIZE);
+            mram_write(output_cache, output + output_idx, MRAM_CACHE_SIZE);
 
             remaining -= part;
             output_idx += MRAM_CACHE_SIZE;
@@ -367,7 +367,7 @@ static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in
         } else if (output_offset < input_offset) {
             size_t part = MIN(remaining, MRAM_CACHE_SIZE - input_offset);
             memcpy(output_cache + output_offset, input_cache + input_offset, part);
-            MRAM_READ(input + input_idx, input_cache, MRAM_CACHE_SIZE);
+            mram_read(input + input_idx, input_cache, MRAM_CACHE_SIZE);
 
             input_idx += MRAM_CACHE_SIZE;
             output_offset += part;
@@ -376,8 +376,8 @@ static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in
             // TODO (optimization) we should handle this case outside the while loop
             size_t part = MIN(remaining, MRAM_CACHE_SIZE - input_offset);
             memcpy(output_cache + output_offset, input_cache + input_offset, part);
-            MRAM_WRITE(output_cache, output + output_idx, MRAM_CACHE_SIZE);
-            MRAM_READ(input + input_idx, input_cache, MRAM_CACHE_SIZE);
+            mram_write(output_cache, output + output_idx, MRAM_CACHE_SIZE);
+            mram_read(input + input_idx, input_cache, MRAM_CACHE_SIZE);
 
             remaining -= part;
             output_idx += MRAM_CACHE_SIZE;
@@ -404,18 +404,18 @@ static inline void MRAM_memset(mram_ostream_t *const out, u8 value, size_t len)
     u32 idx = 0;
     size_t remaining = len;
     if (offset != 0) {
-        MRAM_READ(ptr, cache, MRAM_CACHE_SIZE);
+        mram_read(ptr, cache, MRAM_CACHE_SIZE);
         size_t part = MIN(MRAM_CACHE_SIZE - offset, len);
         memset(cache + offset, value, part);
         remaining -= part;
-        MRAM_WRITE(cache, ptr, MRAM_CACHE_SIZE);
+        mram_write(cache, ptr, MRAM_CACHE_SIZE);
         idx += part;
     }
 
     if (remaining >= MRAM_CACHE_SIZE) {
         memset(cache, value, (offset == 0) ? MRAM_CACHE_SIZE : offset);
         do {
-            MRAM_WRITE(cache, ptr + idx, MRAM_CACHE_SIZE);
+            mram_write(cache, ptr + idx, MRAM_CACHE_SIZE);
             idx += MRAM_CACHE_SIZE;
             remaining -= MRAM_CACHE_SIZE;
         } while (remaining >= MRAM_CACHE_SIZE);
@@ -424,9 +424,9 @@ static inline void MRAM_memset(mram_ostream_t *const out, u8 value, size_t len)
     if (remaining > 0) {
         // TODO we may only need to write the cache here without read & memset
         // if the overriden data is not yet important
-        MRAM_READ(ptr + idx, cache, MRAM_CACHE_SIZE);
+        mram_read(ptr + idx, cache, MRAM_CACHE_SIZE);
         memset(cache, value, remaining);
-        MRAM_WRITE(cache, ptr + idx, MRAM_CACHE_SIZE);
+        mram_write(cache, ptr + idx, MRAM_CACHE_SIZE);
     }
 
     out->ptr += len;

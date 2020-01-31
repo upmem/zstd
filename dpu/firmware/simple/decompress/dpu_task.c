@@ -2,44 +2,30 @@
  * Copyright (c) 2020 - UPMEM
  */
 
+#include <defs.h>
 #include <mram.h>
 #include <perfcounter.h>
 #include <stdint.h>
 
-#ifdef USE_REF_FN
-#include "zstd_decompress.h"
-#else
 #include "dpu_decompress.h"
-#endif
 
-#ifdef USE_REF_FN
-#define INPUT_SIZE (2 << 10)
-#define OUTPUT_SIZE (2 << 10)
-#else
-#define INPUT_SIZE (8 << 20)
-#define OUTPUT_SIZE (8 << 20)
-#endif
+#define INPUT_SIZE (2 << 20)
+#define OUTPUT_SIZE (2 << 20)
 
-__host uint64_t inputSize;
-__host uint64_t resultSize;
-__host uint64_t cycles;
+__host uint32_t inputSize[NR_TASKLETS];
+__host uint32_t resultSize[NR_TASKLETS];
+__host uint64_t cycles[NR_TASKLETS];
 
-#ifdef USE_REF_FN
-__host uint8_t input[INPUT_SIZE];
-__host uint8_t output[OUTPUT_SIZE];
-#else
-__mram_noinit uint8_t input[INPUT_SIZE];
-__mram_noinit uint8_t output[OUTPUT_SIZE];
-#endif
+__mram_noinit uint8_t input[NR_TASKLETS][INPUT_SIZE];
+__mram_noinit uint8_t output[NR_TASKLETS][OUTPUT_SIZE];
 
 int main() {
-  perfcounter_config(COUNT_CYCLES, true);
-#ifdef USE_REF_FN
-  resultSize = ZSTD_decompress(output, OUTPUT_SIZE, input, inputSize);
-#else
-  resultSize = decompress(output, OUTPUT_SIZE, input, inputSize);
-#endif
-  cycles = perfcounter_get();
+  uint8_t id = me();
+  if (id == 0) {
+    perfcounter_config(COUNT_CYCLES, true);
+  }
+  resultSize[id] = decompress(output[id], OUTPUT_SIZE, input[id], inputSize[id]);
+  cycles[id] = perfcounter_get();
 
   return 0;
 }

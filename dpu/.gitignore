@@ -1,4 +1,2 @@
-decompress_mram
-decompress_wram
-firmware/simple/decompress_mram.dpu
-firmware/simple/decompress_wram.dpu
+decompress
+firmware/simple/decompress.dpu
