@@ -64,7 +64,7 @@ static uint32_t DPU_decompress(const uint8_t* src, uint32_t src_size, uint8_t* d
     DPU_ASSERT(dpu_copy_to(dpu, "inputSize", 0, &src_size, sizeof(src_size)));
     DPU_ASSERT(dpu_copy_to(dpu, "input", 0, src, (src_size + 3) & ~3));
     dpu_error_t err = dpu_launch(dpu, DPU_SYNCHRONOUS);
-    DPU_ASSERT(dpu_log_read(dpu, stdout));
+    dpu_log_read(dpu, stdout);
     if (err != DPU_OK) {
         fprintf(stderr, "%s:%d(%s): DPU Error: %s\n", __FILE__, __LINE__, __func__, dpu_error_to_string(err));
         exit(EXIT_FAILURE);
