@@ -28,6 +28,10 @@ int main(int argc, char **argv)
     char *output = argv[2];
 
     FILE *fin = fopen(input, "r");
+    if (fin == NULL) {
+        fprintf(stderr, "could not open file '%s'\n", input);
+        return EXIT_FAILURE;
+    }
 
     fseek(fin, 0, SEEK_END);
     uint32_t input_size = ftell(fin);
@@ -35,17 +39,29 @@ int main(int argc, char **argv)
 
     if (input_size > SRC_SIZE) {
         fprintf(stderr, "input_size is too big (%d > %d)\n", input_size, SRC_SIZE);
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
-    fread(src, sizeof(*src), input_size, fin);
+    size_t fread_res = fread(src, sizeof(*src), input_size, fin);
     fclose(fin);
+    if (fread_res != input_size) {
+        fprintf(stderr, "could not read file '%s'\n", input);
+    }
 
     uint32_t res_size = DPU_decompress(src, input_size, dst);
 
     FILE *fout = fopen(output, "w");
-    fwrite(dst, sizeof(*dst), res_size, fout);
+    if (fout == NULL) {
+        fprintf(stderr, "could not open file '%s'\n", output);
+        return EXIT_FAILURE;
+    }
+
+    size_t fwrite_res = fwrite(dst, sizeof(*dst), res_size, fout);
     fclose(fout);
+    if (fwrite_res != res_size) {
+        fprintf(stderr, "could not write file '%s'\n", output);
+        return EXIT_FAILURE;
+    }
 
     return EXIT_SUCCESS;
 }
