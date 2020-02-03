@@ -185,28 +185,34 @@ static const u32 SEQ_MATCH_LENGTH_BASELINES[53]
 static const u8 SEQ_MATCH_LENGTH_EXTRA_BITS[53] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
 
+#if USE_DEF_GUARDS
 static const u8 SEQ_MAX_CODES[3] = { 35, (u8)-1, 52 };
+#endif
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 static inline i32 highest_set_bit(const u64 num)
 {
+#if USE_DEF_GUARDS
     if (unlikely(num == 0)) {
         return -1;
     }
+#endif
 
     return 63 - __builtin_clzl(num);
 }
 
 static inline const mram(u8 *) MRAM_get_read_ptr(mram_istream_t *const in, size_t len)
 {
+#if USE_DEF_GUARDS
     if (unlikely(len > in->len)) {
         ERROR(IN_TOO_SMALL);
     }
     if (unlikely(in->bit_offset != 0)) {
         ERROR(IN_NOT_ALIGNED);
     }
+#endif
     const mram(u8 *const) ptr = in->ptr;
     in->ptr += len;
     in->len -= len;
@@ -214,9 +220,11 @@ static inline const mram(u8 *) MRAM_get_read_ptr(mram_istream_t *const in, size_
 }
 static inline mram(u8 *) MRAM_get_write_ptr(mram_ostream_t *const out, size_t len)
 {
+#if USE_DEF_GUARDS
     if (unlikely(len > out->len)) {
         ERROR(OUT_TOO_SMALL);
     }
+#endif
     mram(u8 *const) ptr = out->ptr;
     out->ptr += len;
     out->len -= len;
@@ -232,9 +240,11 @@ static inline mram_istream_t MRAM_make_sub_istream(mram_istream_t *const in, siz
 static inline size_t MRAM_istream_len(const mram_istream_t *const in) { return in->len; }
 static inline u64 read_bits_LE(const mram(u8 *) src, const i32 num_bits, const size_t offset)
 {
-    if (num_bits > 64) {
+#if USE_DEF_GUARDS
+    if (unlikely(num_bits > 64)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     // TODO remove softcache
     src += offset / 8;
@@ -276,11 +286,13 @@ static inline u64 read_bits_LE(const mram(u8 *) src, const i32 num_bits, const s
 }
 static inline u64 MRAM_read_bits(mram_istream_t *const in, const i32 num_bits)
 {
-    const size_t bytes = (num_bits + in->bit_offset + 7) / 8;
     const size_t full_bytes = (num_bits + in->bit_offset) / 8;
+#if USE_DEF_GUARDS
+    const size_t bytes = (num_bits + in->bit_offset + 7) / 8;
     if (unlikely(bytes > in->len)) {
         ERROR(IN_TOO_SMALL);
     }
+#endif
     const u64 result = read_bits_LE(in->ptr, num_bits, in->bit_offset);
     in->bit_offset = (num_bits + in->bit_offset) % 8;
     in->ptr += full_bytes;
@@ -290,9 +302,11 @@ static inline u64 MRAM_read_bits(mram_istream_t *const in, const i32 num_bits)
 static inline void MRAM_align_stream(mram_istream_t *const in)
 {
     if (in->bit_offset != 0) {
+#if USE_DEF_GUARDS
         if (unlikely(in->len == 0)) {
             ERROR(IN_TOO_SMALL);
         }
+#endif
         in->ptr++;
         in->len--;
         in->bit_offset = 0;
@@ -309,9 +323,11 @@ static inline void MRAM_rewind_bits(mram_istream_t *const in, const u8 num_bits)
 }
 static inline void MRAM_write_byte(mram_ostream_t *const out, u8 symb)
 {
+#if USE_DEF_GUARDS
     if (unlikely(out->len == 0)) {
         ERROR(OUT_TOO_SMALL);
     }
+#endif
 
     // TODO remove softcache
     out->ptr[0] = symb;
@@ -326,6 +342,7 @@ static inline u8 MRAM_read_byte(mram_istream_t *const in)
 }
 static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in, size_t len)
 {
+#if USE_DEF_GUARDS
     if (unlikely(in->bit_offset != 0)) {
         ERROR(IN_NOT_ALIGNED);
     }
@@ -335,6 +352,7 @@ static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in
     if (unlikely(out->len < len)) {
         ERROR(OUT_TOO_SMALL);
     }
+#endif
 
     u8 *input_cache = in_cache[me()];
     u8 *output_cache = out_cache[me()];
@@ -394,9 +412,11 @@ static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in
 }
 static inline void MRAM_memset(mram_ostream_t *const out, u8 value, size_t len)
 {
+#if USE_DEF_GUARDS
     if (unlikely(out->len < len)) {
         ERROR(OUT_TOO_SMALL);
     }
+#endif
 
     mram(u8 *) ptr = out->ptr;
     u8 *cache = out_cache[me()];
@@ -496,16 +516,22 @@ static void decode_frame(mram_ostream_t *const out, mram_istream_t *const in, co
 {
     const u32 magic_number = (u32)MRAM_read_bits(in, 32);
 
+#if USE_DEF_GUARDS
     if (unlikely(magic_number != ZSTD_MAGIC_NUMBER)) {
         ERROR(INVALID_MAGIC);
     }
+#else
+    (void) magic_number;
+#endif
 
     frame_context_t ctx;
     init_frame_context(&ctx, in, dict);
 
-    if (ctx.header.frame_content_size != 0 && ctx.header.frame_content_size > out->len) {
+#if USE_DEF_GUARDS
+    if (unlikely(ctx.header.frame_content_size != 0 && ctx.header.frame_content_size > out->len)) {
         ERROR(OUT_TOO_SMALL);
     }
+#endif
 
     decompress_data(&ctx, out, in);
 }
@@ -529,13 +555,15 @@ static void parse_frame_header(frame_header_t *const header, mram_istream_t *con
 
     const u8 frame_content_size_flag = descriptor >> 6;
     const u8 single_segment_flag = (descriptor >> 5) & 1;
-    const u8 reserved_bit = (descriptor >> 3) & 1;
     const u8 content_checksum_flag = (descriptor >> 2) & 1;
     const u8 dictionary_id_flag = descriptor & 3;
 
-    if (reserved_bit != 0) {
+#if USE_DEF_GUARDS
+    const u8 reserved_bit = (descriptor >> 3) & 1;
+    if (unlikely(reserved_bit != 0)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     header->single_segment_flag = single_segment_flag != 0;
     header->content_checksum_flag = content_checksum_flag != 0;
@@ -580,9 +608,11 @@ static void frame_context_apply_dict(frame_context_t *const ctx, const dictionar
         return;
     }
 
+#if USE_DEF_GUARDS
     if (unlikely(ctx->header.dictionary_id != 0 && ctx->header.dictionary_id != dict->dictionary_id)) {
         ERROR(WRONG_DICTIONARY);
     }
+#endif
 
     ctx->dict_content = dict->content;
     ctx->dict_content_len = dict->content_size;
@@ -691,9 +721,11 @@ static size_t decode_literals_simple(
         ERROR(IMPOSSIBLE);
     }
 
+#if USE_DEF_GUARDS
     if (unlikely(size > MAX_LITERALS_SIZE)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     mram_ostream_t litstream = MRAM_make_ostream(literals, size);
     switch (block_type) {
@@ -739,9 +771,11 @@ static size_t decode_literals_compressed(frame_context_t *const ctx, mram_istrea
         ERROR(IMPOSSIBLE);
     }
 
+#if USE_DEF_GUARDS
     if (unlikely(regenerated_size > MAX_LITERALS_SIZE)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     mram_ostream_t lit_stream = MRAM_make_ostream(literals, regenerated_size);
     mram_istream_t huf_stream = MRAM_make_sub_istream(in, compressed_size);
@@ -749,9 +783,11 @@ static size_t decode_literals_compressed(frame_context_t *const ctx, mram_istrea
     if (block_type == COMPRESSED_BLOCK) {
         decode_huf_table(&ctx->literals_dtable, &huf_stream);
     } else {
+#if USE_DEF_GUARDS
         if (unlikely(ctx->literals_dtable.symbols == NULL)) {
             ERROR(CORRUPTION);
         }
+#endif
     }
 
     size_t symbols_decoded;
@@ -761,9 +797,11 @@ static size_t decode_literals_compressed(frame_context_t *const ctx, mram_istrea
         symbols_decoded = HUF_decompress_4stream(&ctx->literals_dtable, &lit_stream, &huf_stream);
     }
 
+#if USE_DEF_GUARDS
     if (unlikely(symbols_decoded != regenerated_size)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     return regenerated_size;
 }
@@ -805,13 +843,19 @@ static void fse_decode_hufweights(u8 *weights, mram_istream_t *const in, u8 *con
 
 static void FSE_decode_header(FSE_dtable_t *const dtable, mram_istream_t *const in, const u8 max_accuracy_log, const u8 fse_table_idx)
 {
+#if USE_DEF_GUARDS
     if (unlikely(max_accuracy_log > FSE_MAX_ACCURACY_LOG)) {
         ERROR(FSE_ACCURACY_TOO_LARGE);
     }
+#else
+    (void) max_accuracy_log;
+#endif
     const u8 accuracy_log = 5 + MRAM_read_bits(in, 4);
+#if USE_DEF_GUARDS
     if (unlikely(accuracy_log > max_accuracy_log)) {
         ERROR(FSE_ACCURACY_TOO_LARGE);
     }
+#endif
 
     i32 remaining = 1 << accuracy_log;
     i16 frequencies[FSE_MAX_SYMBS];
@@ -847,9 +891,11 @@ static void FSE_decode_header(FSE_dtable_t *const dtable, mram_istream_t *const 
     }
     MRAM_align_stream(in);
 
+#if USE_DEF_GUARDS
     if (unlikely(remaining != 0)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     FSE_init_dtable(dtable, frequencies, symb, accuracy_log, fse_table_idx);
 }
@@ -890,9 +936,11 @@ static void FSE_init_dtable(FSE_dtable_t *const dtable, const i16 *const norm_fr
             } while (pos >= high_threshold);
         }
     }
+#if USE_DEF_GUARDS
     if (unlikely(pos != 0)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     for (size_t i = 0; i < size; ++i) {
         u8 symbol = dtable->symbols[i];
@@ -918,9 +966,11 @@ static void FSE_init_dtable_rle(FSE_dtable_t *const dtable, const u8 symb, const
 static size_t FSE_decompress_interleaved2(const FSE_dtable_t *const dtable, u8 *const out, mram_istream_t *const in)
 {
     const size_t len = MRAM_istream_len(in);
+#if USE_DEF_GUARDS
     if (unlikely(len == 0)) {
         ERROR(IN_TOO_SMALL);
     }
+#endif
 
     // todo remove softcache
     const mram(u8 *const) src = MRAM_get_read_ptr(in, len);
@@ -982,25 +1032,31 @@ static inline u8 FSE_decode_symbol(
 
 static void HUF_init_dtable_usingweights(HUF_dtable_t *const table, u8 *const weights, const i32 num_symbs)
 {
+#if USE_DEF_GUARDS
     if (unlikely(num_symbs + 1 > HUF_MAX_SYMBOLS)) {
         ERROR(HUF_TOO_MANY_SYMBS);
     }
+#endif
 
     u8 bits[HUF_MAX_SYMBOLS];
     u64 weight_sum = 0;
     for (i32 i = 0; i < num_symbs; ++i) {
+#if USE_DEF_GUARDS
         if (unlikely(weights[i] > HUF_MAX_BITS)) {
             ERROR(CORRUPTION);
         }
+#endif
         weight_sum += weights[i] > 0 ? (u64)1 << (weights[i] - 1) : 0;
     }
 
     const u32 max_bits = highest_set_bit(weight_sum) + 1;
     const u64 left_over = ((u64)1 << max_bits) - weight_sum;
 
+#if USE_DEF_GUARDS
     if (unlikely(left_over & (left_over - 1))) {
         ERROR(CORRUPTION);
     }
+#endif
 
     const u32 last_weight = highest_set_bit(left_over) + 1;
     for (i32 i = 0; i < num_symbs; ++i) {
@@ -1014,23 +1070,26 @@ static void HUF_init_dtable_usingweights(HUF_dtable_t *const table, u8 *const we
 static void HUF_init_dtable(HUF_dtable_t *const table, const u8 *const bits, const i32 num_symbs)
 {
     memset(table, 0, sizeof(HUF_dtable_t));
+#if USE_DEF_GUARDS
     if (unlikely(num_symbs > HUF_MAX_SYMBOLS)) {
         ERROR(HUF_TOO_MANY_SYMBS);
     }
+#endif
 
     u8 max_bits = 0;
     u16 rank_count[HUF_MAX_BITS + 1];
     memset(rank_count, 0, sizeof(rank_count));
     for (i32 i = 0; i < num_symbs; ++i) {
+#if USE_DEF_GUARDS
         if (unlikely(bits[i] > HUF_MAX_BITS)) {
             ERROR(HUF_TABLE_DEPTH_TOO_LARGE);
         }
+#endif
 
         max_bits = MAX(max_bits, bits[i]);
         rank_count[bits[i]]++;
     }
 
-    const size_t table_size = 1 << max_bits;
     table->max_bits = max_bits;
     table->symbols = huf_symbols[me()];
     table->num_bits = huf_num_bits[me()];
@@ -1045,9 +1104,12 @@ static void HUF_init_dtable(HUF_dtable_t *const table, const u8 *const bits, con
         MRAM_memset(&numbitsstream, i, len);
     }
 
+#if USE_DEF_GUARDS
+    const size_t table_size = 1 << max_bits;
     if (unlikely(rank_idx[0] != table_size)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     for (i32 i = 0; i < num_symbs; ++i) {
         if (bits[i] != 0) {
@@ -1063,9 +1125,11 @@ static void HUF_init_dtable(HUF_dtable_t *const table, const u8 *const bits, con
 static size_t HUF_decompress_1stream(const HUF_dtable_t *const dtable, mram_ostream_t *const out, mram_istream_t *const in)
 {
     const size_t len = MRAM_istream_len(in);
+#if USE_DEF_GUARDS
     if (unlikely(len == 0)) {
         ERROR(IN_TOO_SMALL);
     }
+#endif
 
     // TODO remove softcache
     const mram(u8 *const) src = MRAM_get_read_ptr(in, len);
@@ -1081,9 +1145,11 @@ static size_t HUF_decompress_1stream(const HUF_dtable_t *const dtable, mram_ostr
         symbols_written++;
     }
 
+#if USE_DEF_GUARDS
     if (unlikely(bit_offset != -dtable->max_bits)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     return symbols_written;
 }
@@ -1161,9 +1227,11 @@ static size_t decode_num_sequences(mram_istream_t *in)
 static const mram(u8 *) init_sequences(frame_context_t *const ctx, mram_istream_t *in, sequence_states_t *states, i32 *bit_offset)
 {
     u8 compression_modes = MRAM_read_bits(in, 8);
+#if USE_DEF_GUARDS
     if (unlikely((compression_modes & 3) != 0)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     decode_seq_table(&ctx->ll_dtable, in, seq_literal_length, (compression_modes >> 6) & 3, FSE_LL_TABLE_IDX);
     decode_seq_table(&ctx->of_dtable, in, seq_offset, (compression_modes >> 4) & 3, FSE_OF_TABLE_IDX);
@@ -1217,9 +1285,11 @@ static void decode_seq_table(FSE_dtable_t *const table, mram_istream_t *const in
         break;
     }
     case seq_repeat: {
+#if USE_DEF_GUARDS
         if (unlikely(!table->symbols)) {
             ERROR(CORRUPTION);
         }
+#endif
     }
     default:
         ERROR(IMPOSSIBLE);
@@ -1234,9 +1304,11 @@ static void decode_sequence(
     const u8 ll_code = FSE_peek_symbol(&states->ll_table, states->ll_state);
     const u8 ml_code = FSE_peek_symbol(&states->ml_table, states->ml_state);
 
+#if USE_DEF_GUARDS
     if (unlikely(ll_code > SEQ_MAX_CODES[seq_literal_length] || ml_code > SEQ_MAX_CODES[seq_match_length])) {
         ERROR(CORRUPTION);
     }
+#endif
 
     seq->offset = ((u32)1 << of_code) + STREAM_read_bits(src, of_code, offset);
     seq->match_length = SEQ_MATCH_LENGTH_BASELINES[ml_code] + STREAM_read_bits(src, SEQ_MATCH_LENGTH_EXTRA_BITS[ml_code], offset);
@@ -1262,9 +1334,11 @@ static void execute_sequence(frame_context_t *const ctx, mram_ostream_t *const o
 
 static u32 copy_literals(const size_t literal_length, mram_istream_t *litstream, mram_ostream_t *const out)
 {
+#if USE_DEF_GUARDS
     if (unlikely(literal_length > MRAM_istream_len(litstream))) {
         ERROR(CORRUPTION);
     }
+#endif
 
     MRAM_copy(out, litstream, literal_length);
 
@@ -1311,9 +1385,11 @@ static void execute_match_copy(
     // TODO remove softcache
     mram(u8 *) write_ptr = MRAM_get_write_ptr(out, match_length);
     if (total_output <= ctx->header.window_size) {
+#if USE_DEF_GUARDS
         if (unlikely(offset > total_output + ctx->dict_content_len)) {
             ERROR(CORRUPTION);
         }
+#endif
 
         if (offset > total_output) {
             const size_t dict_copy = MIN(offset - total_output, match_length);
@@ -1325,9 +1401,12 @@ static void execute_match_copy(
             write_ptr += dict_copy;
             match_length -= dict_copy;
         }
-    } else if (unlikely(offset > ctx->header.window_size)) {
+    }
+#if USE_DEF_GUARDS
+    else if (unlikely(offset > ctx->header.window_size)) {
         ERROR(CORRUPTION);
     }
+#endif
 
     for (size_t j = 0; j < match_length; ++j) {
         *write_ptr = *(write_ptr - offset);
