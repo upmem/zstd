@@ -339,7 +339,7 @@ static inline void MRAM_rewind_bits(mram_istream_t *const in, const u8 num_bits)
 static inline u8 MRAM_read_byte(mram_istream_t *const in)
 {
     const mram(u8 *) src = MRAM_get_read_ptr(in, 1);
-    
+
     uint8_t *cache = read_cache[me()];
     uintptr_t cache_aligned_src_ptr = ((uintptr_t) src) & ~(MRAM_READ_CACHE_SIZE - 1);
     if (unlikely(cache_aligned_src_ptr != read_cache_ptr[me()])) {
