@@ -25,7 +25,9 @@
 #define FSE_OF_TABLE_IDX (2)
 #define FSE_ML_TABLE_IDX (3)
 
+// TODO fix issues when MRAM_CACHE_SIZE != 8
 #define MRAM_CACHE_SIZE 8
+#define MRAM_READ_CACHE_SIZE 8
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -77,6 +79,8 @@ static __mram_noinit u16 fse_new_state_base[NR_TASKLETS][FSE_NR_TABLES][FSE_MAX_
 
 static __dma_aligned u8 in_cache[NR_TASKLETS][MRAM_CACHE_SIZE];
 static __dma_aligned u8 out_cache[NR_TASKLETS][MRAM_CACHE_SIZE];
+static __dma_aligned u8 read_cache[NR_TASKLETS][MRAM_READ_CACHE_SIZE];
+static uintptr_t read_cache_ptr[NR_TASKLETS] = { [0 ... NR_TASKLETS - 1] = -1 };
 
 typedef struct {
     mram(u8 *) ptr;
@@ -238,7 +242,7 @@ static inline mram_istream_t MRAM_make_sub_istream(mram_istream_t *const in, siz
     return MRAM_make_istream(ptr, len);
 }
 static inline size_t MRAM_istream_len(const mram_istream_t *const in) { return in->len; }
-static inline u64 read_bits_LE(const mram(u8 *) src, const i32 num_bits, const size_t offset)
+static __attribute__((noinline)) u64 read_bits_LE(const mram(u8 *) src, const i32 num_bits, const size_t offset)
 {
 #if USE_DEF_GUARDS
     if (unlikely(num_bits > 64)) {
@@ -246,40 +250,51 @@ static inline u64 read_bits_LE(const mram(u8 *) src, const i32 num_bits, const s
     }
 #endif
 
-    // TODO remove softcache
     src += offset / 8;
     size_t bit_offset = offset % 8;
-    u64 res = 0;
+    u64 res;
 
-    int shift = 0;
-    int left = num_bits;
-
-    if (left == 0) {
+    if (unlikely(num_bits <= 0)) {
         return 0;
     }
 
-    if (bit_offset != 0) {
-        u8 byte_value = *src++ >> bit_offset;
+    uint64_t *cache = (uint64_t *)read_cache[me()];
+    uintptr_t cache_aligned_src_ptr = ((uintptr_t) src) & ~(MRAM_READ_CACHE_SIZE - 1);
+    if (unlikely(cache_aligned_src_ptr != read_cache_ptr[me()])) {
+        mram_read(src, cache, MRAM_READ_CACHE_SIZE);
+        read_cache_ptr[me()] = cache_aligned_src_ptr;
+    }
 
-        if (left < 8) {
-            res = byte_value & ((1 << left) - 1);
+    size_t cache_byte_offset = ((uintptr_t)src) & (MRAM_READ_CACHE_SIZE - 1);
+    size_t cache_index = cache_byte_offset / 8;
+    cache = cache + cache_index;
+
+    size_t cache_offset = ((cache_byte_offset & 7) * 8) + bit_offset;
+
+    if (cache_offset == 0) {
+        res = *cache & ((1l << num_bits) - 1);
+    } else {
+        size_t bits = 64 - cache_offset;
+
+        if ((size_t)num_bits <= bits) {
+            res = (*cache >> cache_offset) & ((1l << num_bits) - 1);
         } else {
-            res = byte_value;
+            res = *cache >> cache_offset;
+
+#if MRAM_READ_CACHE_SIZE == 8
+            mram_read(src + 8, cache, MRAM_READ_CACHE_SIZE);
+            read_cache_ptr[me()] = cache_aligned_src_ptr + MRAM_READ_CACHE_SIZE;
+#else
+            if (unlikely(cache_index == ((MRAM_READ_CACHE_SIZE / 8) - 1))) {
+                cache = (uint64_t *)read_cache[me()];
+                mram_read(src + 8, cache, MRAM_READ_CACHE_SIZE);
+                read_cache_ptr[me()] = cache_aligned_src_ptr + MRAM_READ_CACHE_SIZE;
+            } else {
+                cache++;
+            }
+#endif
+            res |= (*cache & ((1l << (num_bits - bits)) - 1)) << bits;
         }
-
-        shift += 8 - bit_offset;
-        left -= 8 - bit_offset;
-    }
-
-    while (left >= 8) {
-        res |= ((u64)((*src++) & 0xff)) << shift;
-        shift += 8;
-        left -= 8;
-    }
-
-    if (left > 0) {
-        u64 mask = (1 << left) - 1;
-        res += ((u64)((*src++) & mask)) << shift;
     }
 
     return res;
@@ -321,24 +336,19 @@ static inline void MRAM_rewind_bits(mram_istream_t *const in, const u8 num_bits)
     in->len += bytes;
     in->bit_offset = ((new_offset % 8) + 8) % 8;
 }
-static inline void MRAM_write_byte(mram_ostream_t *const out, u8 symb)
-{
-#if USE_DEF_GUARDS
-    if (unlikely(out->len == 0)) {
-        ERROR(OUT_TOO_SMALL);
-    }
-#endif
-
-    // TODO remove softcache
-    out->ptr[0] = symb;
-    out->ptr++;
-    out->len--;
-}
 static inline u8 MRAM_read_byte(mram_istream_t *const in)
 {
-    // TODO remove softcache
     const mram(u8 *) src = MRAM_get_read_ptr(in, 1);
-    return src[0];
+    
+    uint8_t *cache = read_cache[me()];
+    uintptr_t cache_aligned_src_ptr = ((uintptr_t) src) & ~(MRAM_READ_CACHE_SIZE - 1);
+    if (unlikely(cache_aligned_src_ptr != read_cache_ptr[me()])) {
+        mram_read(src, cache, MRAM_READ_CACHE_SIZE);
+        read_cache_ptr[me()] = cache_aligned_src_ptr;
+    }
+    size_t cache_offset = ((uintptr_t) src) & (MRAM_READ_CACHE_SIZE - 1);
+
+    return cache[cache_offset];
 }
 static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in, size_t len)
 {
@@ -1131,19 +1141,44 @@ static size_t HUF_decompress_1stream(const HUF_dtable_t *const dtable, mram_ostr
     }
 #endif
 
-    // TODO remove softcache
     const mram(u8 *const) src = MRAM_get_read_ptr(in, len);
+    // TODO remove softcache?
     const i32 padding = 8 - highest_set_bit(src[len - 1]);
     i32 bit_offset = len * 8 - padding;
     u16 state;
 
     HUF_init_state(dtable, &state, src, &bit_offset);
 
+    u8 *cache = in_cache[me()];
+    mram(u8 *) ptr = out->ptr;
+    u8 offset = ((uintptr_t)ptr) & (MRAM_CACHE_SIZE - 1);
+    if (offset != 0) {
+        mram_read(ptr, cache, MRAM_CACHE_SIZE);
+    }
+
     size_t symbols_written = 0;
     while (bit_offset > -dtable->max_bits) {
-        MRAM_write_byte(out, HUF_decode_symbol(dtable, &state, src, &bit_offset));
+        cache[offset++] = HUF_decode_symbol(dtable, &state, src, &bit_offset);
+        if (offset == MRAM_CACHE_SIZE) {
+            mram_write(cache, ptr, MRAM_CACHE_SIZE);
+            offset = 0;
+            ptr += MRAM_CACHE_SIZE;
+        }
         symbols_written++;
     }
+
+    if (offset != 0) {
+        if (ptr != out->ptr) {
+            u8 *other_cache = out_cache[me()];
+            mram_read(ptr, other_cache, MRAM_CACHE_SIZE);
+            memcpy(other_cache, cache, offset);
+            cache = other_cache;
+        }
+        mram_write(cache, ptr, MRAM_CACHE_SIZE);
+    }
+
+    out->ptr += symbols_written;
+    out->len -= symbols_written;
 
 #if USE_DEF_GUARDS
     if (unlikely(bit_offset != -dtable->max_bits)) {
@@ -1382,7 +1417,6 @@ static size_t compute_offset(sequence_command_t seq, u32 *const offset_hist)
 static void execute_match_copy(
     frame_context_t *const ctx, size_t offset, size_t match_length, size_t total_output, mram_ostream_t *const out)
 {
-    // TODO remove softcache
     mram(u8 *) write_ptr = MRAM_get_write_ptr(out, match_length);
     if (total_output <= ctx->header.window_size) {
 #if USE_DEF_GUARDS
@@ -1408,8 +1442,15 @@ static void execute_match_copy(
     }
 #endif
 
-    for (size_t j = 0; j < match_length; ++j) {
-        *write_ptr = *(write_ptr - offset);
-        write_ptr++;
+    if (match_length <= offset) {
+        mram_istream_t instream = MRAM_make_istream(write_ptr - offset, match_length);
+        mram_ostream_t outstream = MRAM_make_ostream(write_ptr, match_length);
+        MRAM_copy(&outstream, &instream, match_length);
+    } else {
+        // TODO optimize this part
+        for (size_t j = 0; j < match_length; ++j) {
+            *write_ptr = *(write_ptr - offset);
+            write_ptr++;
+        }
     }
 }
