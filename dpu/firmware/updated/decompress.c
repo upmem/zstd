@@ -1244,9 +1244,9 @@ static size_t HUF_readTableX1(__mram_ptr u32 *DTable, struct MramStream *src, si
 #endif
         dtd.tableType = 0;
         dtd.tableLog = (u8)tableLog;
-        printf("TODO %d\n", __LINE__);
-        // TODO memcpy(DTable, &dtd, sizeof(dtd));
-        abort();
+        // memcpy(DTable, &dtd, sizeof(dtd));
+        u32 value = dtd.maxTableLog | (dtd.tableType << 8) | (dtd.tableLog << 8);
+        *DTable = value;
     }
 
     /* Calculate starting value for each rank */
