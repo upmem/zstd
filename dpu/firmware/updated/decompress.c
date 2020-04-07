@@ -1,6 +1,7 @@
 #include <attributes.h>
 #include <defs.h>
 #include <mram.h>
+#include <perfcounter.h>
 #include <seqread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -34,6 +35,7 @@ typedef int64_t s64;
 #define ZSTD_MAGIC_NUMBER (0xFD2FB528U)
 
 #define ZSTD_REP_NUM      3                 /* number of repcodes */
+static const u32 repStartValue[ZSTD_REP_NUM] = { 1, 4, 8 };
 
 #define ZSTD_BLOCKSIZELOG_MAX  17
 #define ZSTD_BLOCKSIZE_MAX     (1<<ZSTD_BLOCKSIZELOG_MAX)
@@ -366,7 +368,7 @@ static void MRAM_memcpy(__mram_ptr void *dst, const __mram_ptr void *src, size_t
 
     if (srcOff == dstOff) {
         u32 idx = 0;
-        size_t len = MRAM_CACHE_SIZE - srcOff;
+        size_t len = MIN(remaining, MRAM_CACHE_SIZE - srcOff);
 
         mram_read(src, srcCache, MRAM_CACHE_SIZE);
         memcpy(dstCache + dstOff, srcCache + srcOff, len);
@@ -518,8 +520,6 @@ static size_t getFrameHeader(struct FrameHeader *frameHeader, const void *src) {
     }
 
     if (singleSegment) windowSize = frameContentSize;
-
-    printf("Frame Header %d %d %d %d\n", frameContentSize, windowSize, dictID, checksumFlag);
 
     frameHeader->frameContentSize = frameContentSize;
     frameHeader->windowSize = windowSize;
@@ -1020,6 +1020,7 @@ static size_t FSE_decompress_usingDTable_generic(
     /* Init */
     __mram_ptr void* start = (__mram_ptr void*)streamGetMramAddr(cSrc);
     BIT_initDStream(&bitD, start, cSrcSize);
+    streamSetAt(cSrc, start + cSrcSize);
 
     FSE_initDState(&state1, &bitD, dt);
     FSE_initDState(&state2, &bitD, dt);
@@ -1245,7 +1246,7 @@ static size_t HUF_readTableX1(__mram_ptr u32 *DTable, struct MramStream *src, si
         dtd.tableType = 0;
         dtd.tableLog = (u8)tableLog;
         // memcpy(DTable, &dtd, sizeof(dtd));
-        u32 value = dtd.maxTableLog | (dtd.tableType << 8) | (dtd.tableLog << 8);
+        u32 value = dtd.maxTableLog | (dtd.tableType << 8) | (dtd.tableLog << 16);
         *DTable = value;
     }
 
@@ -1348,6 +1349,7 @@ static size_t HUF_decompress1XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
 
     __mram_ptr void* start = (__mram_ptr void*)streamGetMramAddr(cSrc);
     BIT_initDStream(&bitD, start, cSrcSize);
+    streamSetAt(cSrc, start + cSrcSize);
 
     HUF_decodeStreamX1(op, &bitD, oend, dt, dtLog);
 
@@ -1375,7 +1377,6 @@ static size_t HUF_decompress4XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     __mram_ptr u8 *const olimit = oend - 3;
     const __mram_ptr void* const dtPtr = DTable + 1;
     const __mram_ptr struct HUF_DEltX1* const dt = (const __mram_ptr struct HUF_DEltX1*)dtPtr;
-
 
     /* Init */
     struct BIT_DStream bitD1;
@@ -1417,6 +1418,7 @@ static size_t HUF_decompress4XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     BIT_initDStream(&bitD2, istart2, length2);
     BIT_initDStream(&bitD3, istart3, length3);
     BIT_initDStream(&bitD4, istart4, length4);
+    streamSetAt(cSrc, istart + cSrcSize);
 
     /* up to 16 symbols per loop (4 symbols per stream) in 64-bit mode */
     for ( ; (endSignal) & (op4 < olimit) ; ) {
@@ -1492,8 +1494,6 @@ static size_t decodeLiteralsBlock(struct FrameContext *ctx, struct MramStream *s
 #endif
     const u8 *const istart = src->ptr;
     SymbolEncodingType const litEncType = (SymbolEncodingType)(istart[0] & 3);
-
-    printf("Literals block %d\n", litEncType);
 
     switch (litEncType) {
         case set_repeat:
@@ -1676,9 +1676,9 @@ static void buildFSETable(__mram_ptr struct SeqSymbol *dt, const short *normaliz
 
     /* Init, lay down lowprob symbols */
     {
-        struct SeqSymbolHeader DTableH;
-        DTableH.tableLog = tableLog;
-        DTableH.fastMode = 1;
+        struct SeqSymbolHeader *DTableH = (struct SeqSymbolHeader *)mramWriteCache[me()];
+        DTableH->tableLog = tableLog;
+        DTableH->fastMode = 1;
         {
             s16 const largeLimit= (s16)(1 << (tableLog-1));
             u32 s;
@@ -1687,7 +1687,7 @@ static void buildFSETable(__mram_ptr struct SeqSymbol *dt, const short *normaliz
                     tableDecode[highThreshold--].baseValue = s;
                     symbolNext[s] = 1;
                 } else {
-                    if (normalizedCounter[s] >= largeLimit) DTableH.fastMode=0;
+                    if (normalizedCounter[s] >= largeLimit) DTableH->fastMode=0;
 #if USE_DEF_GUARDS
                     if (unlikely(normalizedCounter[s]<0)) {
                         abort();
@@ -1697,9 +1697,8 @@ static void buildFSETable(__mram_ptr struct SeqSymbol *dt, const short *normaliz
                 }
             }
         }
-        printf("TODO %d\n", __LINE__);
-        // TODO memcpy(dt, &DTableH, sizeof(DTableH));
-        abort();
+        // memcpy(dt, &DTableH, sizeof(DTableH));
+        mram_write(DTableH, dt, sizeof(*DTableH));
     }
 
     /* Spread symbols */
@@ -2343,6 +2342,21 @@ static size_t decompressBlock(struct FrameContext *ctx, __mram_ptr void *dst, si
     }
 }
 
+static void decompressBegin(struct FrameContext *ctx) {
+    ctx->dictEnd = (__mram_ptr void *)NULL;
+    ctx->entropy.hufTable[0] = (u32)((HufLog)*0x0000001); // little endian only
+    memcpy(ctx->entropy.rep, repStartValue, sizeof(repStartValue));  /* initial repcodes */
+    ctx->LLTptr = ctx->entropy.LLTable;
+    ctx->MLTptr = ctx->entropy.MLTable;
+    ctx->OFTptr = ctx->entropy.OFTable;
+    ctx->hufPtr = ctx->entropy.hufTable;
+}
+
+static void checkContinuity(struct FrameContext *ctx, const __mram_ptr void *dst) {
+    ctx->virtualStart = dst;
+    ctx->prefixStart = dst;
+}
+
 static size_t decompress(__mram_ptr void *dst, size_t dstCapacity, __mram_ptr const void *src, size_t srcSize) {
     u32 id = me();
     __mram_ptr u8 * const ostart = dst;
@@ -2359,10 +2373,9 @@ static size_t decompress(__mram_ptr void *dst, size_t dstCapacity, __mram_ptr co
     ctx.entropy.OFTable = OFTableStorage[id];
     ctx.entropy.MLTable = MLTableStorage[id];
     ctx.entropy.hufTable = hufTableStorage[id];
-    //TODO initialize the FrameContext
-    //const __mram_ptr void* prefixStart;
-    //const __mram_ptr void* virtualStart;
-    //const __mram_ptr void* dictEnd;
+
+    decompressBegin(&ctx);
+    checkContinuity(&ctx, dst);
 
     /* Frame Header */
     struct FrameHeader frameHeader;
@@ -2380,8 +2393,6 @@ static size_t decompress(__mram_ptr void *dst, size_t dstCapacity, __mram_ptr co
         size_t blockSize = blockHeader >> 3;
         streamAdvance(&istream, ZSTD_BLOCKHEADERSIZE);
         remainingSrcSize -= ZSTD_BLOCKHEADERSIZE;
-
-        printf("New block %d %d %d\n", blockType, blockSize, lastBlock);
 
         size_t decodedSize;
         switch (blockType) {
@@ -2415,9 +2426,14 @@ __mram_noinit u8 output[NR_TASKLETS][OUTPUT_CAPACITY];
 
 __host size_t inputSize[NR_TASKLETS];
 __host size_t resultSize[NR_TASKLETS];
+__host uint64_t cycles[NR_TASKLETS];
 
 int main() {
     u32 id = me();
+    if (id == 0) {
+        perfcounter_config(COUNT_CYCLES, true);
+    }
     resultSize[id] = decompress(output[id], OUTPUT_CAPACITY, input[id], inputSize[id]);
+    cycles[id] = perfcounter_get();
     return 0;
 }
