@@ -2275,8 +2275,8 @@ static size_t decompressSequences(struct FrameContext *ctx, __mram_ptr void *dst
             seqState.prevOffset[i] = ctx->entropy.rep[i];
         }
 
-        __mram_ptr void* seqStartMram = (__mram_ptr void*) streamGetMramAddr(seqStart);
-        BIT_initDStream(&seqState.DStream, seqStartMram, iend-imram);
+        BIT_initDStream(&seqState.DStream, imram, iend-imram);
+        streamSetAt(seqStart, iend);
 
         initFseState(&seqState.stateLL, &seqState.DStream, ctx->LLTptr);
         initFseState(&seqState.stateOffb, &seqState.DStream, ctx->OFTptr);
