@@ -49,13 +49,6 @@ typedef enum {
 } block_type_t;
 
 typedef enum {
-    SET_BASIC = 0,
-    SET_RLE = 1,
-    SET_COMPRESSED = 2,
-    SET_REPEAT = 3,
-} enc_type_t;
-
-typedef enum {
     OK = 0,
     INVALID_MAGIC = 1,
     OUT_TOO_SMALL = 2,
@@ -343,7 +336,7 @@ static inline void MRAM_rewind_bits(mram_istream_t *const in, const u8 num_bits)
     in->len += bytes;
     in->bit_offset = ((new_offset % 8) + 8) % 8;
 }
-static inline u8 MRAM_read8(mram_istream_t *const in)
+static inline u8 MRAM_read_byte(mram_istream_t *const in)
 {
     const mram(u8 *) src = MRAM_get_read_ptr(in, 1);
 
@@ -357,27 +350,6 @@ static inline u8 MRAM_read8(mram_istream_t *const in)
 
     return cache[cache_offset];
 }
-static inline u16 MRAM_read16(mram_istream_t *const in)
-{
-    // TODO optimize that
-    return MRAM_read8(in) | (MRAM_read8(in) << 8);
-}
-static inline u32 MRAM_read24(mram_istream_t *const in)
-{
-    // TODO optimize that
-    return MRAM_read16(in) | (MRAM_read8(in) << 16);
-}
-static inline u32 MRAM_read32(mram_istream_t *const in)
-{
-    // TODO optimize that
-    return MRAM_read16(in) | (MRAM_read16(in) << 16);
-}
-static inline u64 MRAM_read64(mram_istream_t *const in)
-{
-    // TODO optimize that
-    return ((u64)MRAM_read32(in)) | ((u64)(MRAM_read32(in)) << 32);
-}
-
 static inline void MRAM_copy(mram_ostream_t *const out, mram_istream_t *const in, size_t len)
 {
 #if USE_DEF_GUARDS
@@ -552,7 +524,7 @@ size_t decompress(
 
 static void decode_frame(mram_ostream_t *const out, mram_istream_t *const in, const dictionary_t *const dict)
 {
-    const u32 magic_number = MRAM_read32(in);
+    const u32 magic_number = (u32)MRAM_read_bits(in, 32);
 
 #if USE_DEF_GUARDS
     if (unlikely(magic_number != ZSTD_MAGIC_NUMBER)) {
@@ -589,7 +561,7 @@ static void init_frame_context(frame_context_t *const ctx, mram_istream_t *const
 
 static void parse_frame_header(frame_header_t *const header, mram_istream_t *const in)
 {
-    const u8 descriptor = MRAM_read8(in);
+    const u8 descriptor = (u8)MRAM_read_bits(in, 8);
 
     const u8 frame_content_size_flag = descriptor >> 6;
     const u8 single_segment_flag = (descriptor >> 5) & 1;
@@ -607,7 +579,7 @@ static void parse_frame_header(frame_header_t *const header, mram_istream_t *con
     header->content_checksum_flag = content_checksum_flag != 0;
 
     if (!single_segment_flag) {
-        u8 window_descriptor = MRAM_read8(in);
+        u8 window_descriptor = (u8)MRAM_read_bits(in, 8);
         u8 exponent = window_descriptor >> 3;
         u8 mantissa = window_descriptor & 7;
 
@@ -616,32 +588,24 @@ static void parse_frame_header(frame_header_t *const header, mram_istream_t *con
         header->window_size = window_base + window_add;
     }
 
-    u32 dict_id = 0;
-    switch (dictionary_id_flag) {
-        default:
-#if USE_DEF_GUARDS
-            ERROR(CORRUPTION);
-#endif
-        case 0: break;
-        case 1: dict_id = MRAM_read8(in); break;
-        case 2: dict_id = MRAM_read16(in); break;
-        case 3: dict_id = MRAM_read32(in); break;
+    if (dictionary_id_flag) {
+        const u8 bytes_array[] = { 0, 1, 2, 4 };
+        const u8 bytes = bytes_array[dictionary_id_flag];
+        header->dictionary_id = (u32)MRAM_read_bits(in, bytes * 8);
+    } else {
+        header->dictionary_id = 0;
     }
-    header->dictionary_id = dict_id;
 
-    size_t frame_content_size = 0;
-    switch (frame_content_size_flag) {
-        default:
-#if USE_DEF_GUARDS
-            ERROR(CORRUPTION);
-#endif
-        case 0: if (single_segment_flag) frame_content_size = MRAM_read8(in); break;
-        case 1: frame_content_size = MRAM_read16(in) + 256; break;
-        case 2: frame_content_size = MRAM_read32(in); break;
-        case 3: frame_content_size = MRAM_read64(in); break;
-
+    if (single_segment_flag || frame_content_size_flag) {
+        const u8 bytes_array[] = { 1, 2, 4, 8 };
+        const u8 bytes = bytes_array[frame_content_size_flag];
+        header->frame_content_size = MRAM_read_bits(in, bytes * 8);
+        if (bytes == 2) {
+            header->frame_content_size += 256;
+        }
+    } else {
+        header->frame_content_size = 0;
     }
-    header->frame_content_size = frame_content_size;
 
     if (single_segment_flag) {
         header->window_size = header->frame_content_size;
@@ -675,10 +639,9 @@ static void decompress_data(frame_context_t *const ctx, mram_ostream_t *const ou
     bool last_block;
 
     do {
-        u32 block_header = MRAM_read24(in);
-        last_block = (block_header & 1) != 0;
-        const block_type_t block_type = (block_type_t)((block_header >> 1) & 3);
-        const size_t block_len = block_header >> 3;
+        last_block = ((u32)MRAM_read_bits(in, 1)) != 0;
+        const block_type_t block_type = (block_type_t)MRAM_read_bits(in, 2);
+        const size_t block_len = MRAM_read_bits(in, 21);
 
         switch (block_type) {
         case RAW_BLOCK: {
@@ -687,7 +650,7 @@ static void decompress_data(frame_context_t *const ctx, mram_ostream_t *const ou
             break;
         }
         case RLE_BLOCK: {
-            u8 value = MRAM_read8(in);
+            u8 value = MRAM_read_byte(in);
             MRAM_memset(out, value, block_len);
             ctx->current_total_output += block_len;
             break;
@@ -737,57 +700,8 @@ static void decompress_block(frame_context_t *const ctx, mram_ostream_t *const o
     ctx->current_total_output = total_output;
 }
 
-static size_t decode_literals_simple_size(mram_istream_t *const in, u8 byte, u8 format)
-{
-    size_t size;
-    switch (format) {
-        case 0: case 2: default:
-            size = byte >> 3;
-            break;
-        case 1:
-            size = (byte >> 4) | (MRAM_read8(in) << 4);
-            break;
-        case 3:
-            size = (byte >> 4) | (MRAM_read16(in) << 4);
-            break;
-    }
-    return size;
-}
-
 static size_t decode_literals(frame_context_t *const ctx, mram_istream_t *const in, mram(u8 *const) literals)
 {
-    u8 first_byte = MRAM_read8(in);
-    enc_type_t enc_type = first_byte & 3;
-    u8 size_format = (first_byte >> 2) & 3;
-
-    size_t size;
-    switch (enc_type) {
-        case SET_BASIC: {
-            size = decode_literals_simple_size(in, first_byte, size_format);
-            // TODO literals is READ-ONLY (I think), we may only need to redirect literals to in
-            mram_ostream_t litstream = MRAM_make_ostream(literals, size);
-            MRAM_copy(&litstream, in, size);
-            break;
-        }
-        case SET_RLE: {
-            size = decode_literals_simple_size(in, first_byte, size_format);
-            const u8 value = MRAM_read8(in);
-            mram_ostream_t litstream = MRAM_make_ostream(literals, size);
-            MRAM_memset(&litstream, value, size);
-            break;
-        }
-        case SET_REPEAT:
-        case SET_COMPRESSED: {
-            // TODO
-
-            break;
-        }
-        default:
-            ERROR(CORRUPTION);
-    }
-
-    return size;
-
     const u8 block_type = (u8)MRAM_read_bits(in, 2);
     const u8 size_format = (u8)MRAM_read_bits(in, 2);
 
@@ -831,7 +745,7 @@ static size_t decode_literals_simple(
         break;
     }
     case RLE_BLOCK: {
-        const u8 value = MRAM_read8(in);
+        const u8 value = MRAM_read_byte(in);
         MRAM_memset(&litstream, value, size);
         break;
     }
@@ -1397,7 +1311,7 @@ static void decode_seq_table(FSE_dtable_t *const table, mram_istream_t *const in
         break;
     }
     case seq_rle: {
-        const u8 symb = MRAM_read8(in);
+        const u8 symb = MRAM_read_byte(in);
         FSE_init_dtable_rle(table, symb, fse_table_idx);
         break;
     }
