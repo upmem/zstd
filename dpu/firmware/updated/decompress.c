@@ -348,8 +348,9 @@ size_t MRAM_readST(const __mram_ptr void *ptr) {
 }
 
 #define MRAM_CACHE_SIZE 32
-#define MRAM_CACHE_OFF_MASK (MRAM_CACHE_SIZE - 1)
-#define DMA_ALIGNED(x) ALIGN(x, 8)
+#define DMA_ALIGNMENT 8
+#define DMA_OFF_MASK (DMA_ALIGNMENT - 1)
+#define DMA_ALIGNED(x) ALIGN(x, DMA_ALIGNMENT)
 
 static __dma_aligned u8 mramReadCache[NR_TASKLETS][MRAM_CACHE_SIZE];
 static __dma_aligned u8 mramWriteCache[NR_TASKLETS][MRAM_CACHE_SIZE];
@@ -358,8 +359,8 @@ static void MRAM_memcpy(__mram_ptr void *dst, const __mram_ptr void *src, size_t
     u8 *srcCache = mramReadCache[me()];
     u8 *dstCache = mramWriteCache[me()];
 
-    u32 srcOff = ((uintptr_t)src) & MRAM_CACHE_OFF_MASK;
-    u32 dstOff = ((uintptr_t)dst) & MRAM_CACHE_OFF_MASK;
+    u32 srcOff = ((uintptr_t)src) & DMA_OFF_MASK;
+    u32 dstOff = ((uintptr_t)dst) & DMA_OFF_MASK;
     size_t remaining = length;
 
     if (dstOff != 0) {
@@ -1301,6 +1302,7 @@ static u8 HUF_decodeSymbolX1(struct BIT_DStream* Dstream, const __mram_ptr struc
     return c;
 }
 
+// TODO remove softcache
 #define HUF_DECODE_SYMBOLX1_0(ptr, DStreamPtr) \
     *ptr++ = HUF_decodeSymbolX1(DStreamPtr, dt, dtLog)
 
