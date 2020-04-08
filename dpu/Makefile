@@ -1,6 +1,6 @@
 .PHONY: default all host dpu clean
 
-NR_TASKLETS ?= 15
+NR_TASKLETS ?= 13
 
 default: all
 
