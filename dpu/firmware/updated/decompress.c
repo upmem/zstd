@@ -336,7 +336,30 @@ u32 WRAM_read24(const void *ptr) {
     return WRAM_read16(ptr) + (((const u8*)ptr)[2] << 16);
 }
 
-u32 MRAM_read32(const __mram_ptr void *ptr) { return ((const __mram_ptr unalign32*)ptr)->v; }
+#define DMA_ALIGNMENT 8
+#define DMA_OFF_MASK (DMA_ALIGNMENT - 1)
+#define DMA_ALIGNED(x) ALIGN(x, DMA_ALIGNMENT)
+
+u32 MRAM_read32(const __mram_ptr void *ptr) {
+    u32 off = ((uintptr_t)ptr) & DMA_OFF_MASK;
+    if (off <= 4) {
+        u64 cache;
+        mram_read(ptr, &cache, 8);
+        switch (off) {
+            case 0:
+                return (u32) cache;
+            case 4:
+                return (u32) (cache >> 32);
+            default:
+                return (u32) (cache >> (off * 8));
+        }
+    } else {
+        u64 cache[2];
+        mram_read(ptr, cache, 16);
+        return (((u32)(cache[0] >> 32)) >> ((off - 4) * 8)) | (((u32)cache[1]) << ((8 - off) * 8));
+    }
+}
+
 u64 MRAM_read64(const __mram_ptr void *ptr) { return ((const __mram_ptr unalign64*)ptr)->v; }
 
 size_t MRAM_readST(const __mram_ptr void *ptr) {
@@ -348,14 +371,43 @@ size_t MRAM_readST(const __mram_ptr void *ptr) {
 }
 
 #define MRAM_CACHE_SIZE 32
-#define DMA_ALIGNMENT 8
-#define DMA_OFF_MASK (DMA_ALIGNMENT - 1)
-#define DMA_ALIGNED(x) ALIGN(x, DMA_ALIGNMENT)
 
 static __dma_aligned u8 mramReadCache[NR_TASKLETS][MRAM_CACHE_SIZE];
 static __dma_aligned u8 mramWriteCache[NR_TASKLETS][MRAM_CACHE_SIZE];
 
+#define DEFINE_MRAM_copyN(size) \
+static inline void MRAM_copy##size(__mram_ptr void *dst, const __mram_ptr void *src) { \
+    u8 *srcCache = mramReadCache[me()]; \
+    u8 *dstCache = mramWriteCache[me()]; \
+    u32 srcOff = ((uintptr_t)src) & DMA_OFF_MASK; \
+    u32 dstOff = ((uintptr_t)dst) & DMA_OFF_MASK; \
+    if (dstOff == 0) { \
+        if (srcOff == 0) { \
+            mram_read(src, dstCache, size); \
+        } else { \
+            mram_read(src, srcCache, size + 8); \
+            memcpy(dstCache, srcCache + srcOff, size); \
+        } \
+        mram_write(dstCache, dst, size); \
+    } else { \
+        mram_read(dst, dstCache, size + 8); \
+        if (srcOff == 0) { \
+            mram_read(src, srcCache, size); \
+            memcpy(dstCache + dstOff, srcCache, size); \
+        } else { \
+            mram_read(src, srcCache, size + 8); \
+            memcpy(dstCache + dstOff, srcCache + srcOff, size); \
+        } \
+        mram_write(dstCache, dst, size + 8); \
+    } \
+}
+
+DEFINE_MRAM_copyN(4)
+DEFINE_MRAM_copyN(8)
+DEFINE_MRAM_copyN(16)
+
 static void MRAM_memcpy(__mram_ptr void *dst, const __mram_ptr void *src, size_t length) {
+    printf("%d\n", length);
     u8 *srcCache = mramReadCache[me()];
     u8 *dstCache = mramWriteCache[me()];
 
@@ -418,7 +470,6 @@ static void MRAM_memcpy(__mram_ptr void *dst, const __mram_ptr void *src, size_t
 }
 
 static void MRAM_memmove(__mram_ptr void *dst, const __mram_ptr void *src, size_t length) {
-    printf("TODO %d\n", __LINE__);
     // TODO
     (void) dst;
     (void) src;
@@ -586,7 +637,6 @@ static size_t FSE_readNCount(short *normalizedCounter, unsigned *maxSVPtr, unsig
     int previous0 = 0;
 
     if (hbSize < 4) {
-        printf("TODO %d\n", __LINE__);
         // TODO
         abort();
     }
@@ -833,7 +883,6 @@ static size_t BIT_initDStream(struct BIT_DStream *bitD, const __mram_ptr void *s
 #endif
         }
     } else {
-        printf("TODO %d\n", __LINE__);
         // TODO
         abort();
     }
@@ -1996,9 +2045,9 @@ static struct Seq decodeSequence(struct SeqState *seqState) {
 #define COPY8(d,s) { copy8(d,s); d+=8; s+=8; }
 #define COPY16(d,s) { copy16(d,s); d+=16; s+=16; }
 
-static void copy4(__mram_ptr void* dst, const __mram_ptr void* src) { MRAM_memcpy(dst, src, 4); }
-static void copy8(__mram_ptr void* dst, const __mram_ptr void* src) { MRAM_memcpy(dst, src, 8); }
-static void copy16(__mram_ptr void* dst, const __mram_ptr void* src) { MRAM_memcpy(dst, src, 16); }
+static inline void copy4(__mram_ptr void* dst, const __mram_ptr void* src) { MRAM_copy4(dst, src); }
+static inline void copy8(__mram_ptr void* dst, const __mram_ptr void* src) { MRAM_copy8(dst, src); }
+static inline void copy16(__mram_ptr void* dst, const __mram_ptr void* src) { MRAM_copy16(dst, src); }
 
 static void wildcopy(__mram_ptr void *dst, const __mram_ptr void *src, ptrdiff_t length, ZSTD_overlap ovtype) {
     ptrdiff_t diff = dst - src;
