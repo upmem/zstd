@@ -408,7 +408,6 @@ DEFINE_MRAM_copyN(8)
 DEFINE_MRAM_copyN(16)
 
 static void MRAM_memcpy(__mram_ptr void *dst, const __mram_ptr void *src, size_t length) {
-    printf("%d\n", length);
     u8 *srcCache = mramReadCache[me()];
     u8 *dstCache = mramWriteCache[me()];
 
