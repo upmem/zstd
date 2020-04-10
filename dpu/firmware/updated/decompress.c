@@ -381,24 +381,25 @@ static inline void MRAM_copy##size(__mram_ptr void *dst, const __mram_ptr void *
     u8 *dstCache = mramWriteCache[me()]; \
     u32 srcOff = ((uintptr_t)src) & DMA_OFF_MASK; \
     u32 dstOff = ((uintptr_t)dst) & DMA_OFF_MASK; \
+    u32 sizeDma = DMA_ALIGNED(size); \
     if (dstOff == 0) { \
         if (srcOff == 0) { \
-            mram_read(src, dstCache, size); \
+            mram_read(src, dstCache, sizeDma); \
         } else { \
-            mram_read(src, srcCache, size + 8); \
+            mram_read(src, srcCache, sizeDma + 8); \
             memcpy(dstCache, srcCache + srcOff, size); \
         } \
-        mram_write(dstCache, dst, size); \
+        mram_write(dstCache, dst, sizeDma); \
     } else { \
-        mram_read(dst, dstCache, size + 8); \
+        mram_read(dst, dstCache, sizeDma + 8); \
         if (srcOff == 0) { \
-            mram_read(src, srcCache, size); \
+            mram_read(src, srcCache, sizeDma); \
             memcpy(dstCache + dstOff, srcCache, size); \
         } else { \
-            mram_read(src, srcCache, size + 8); \
+            mram_read(src, srcCache, sizeDma + 8); \
             memcpy(dstCache + dstOff, srcCache + srcOff, size); \
         } \
-        mram_write(dstCache, dst, size + 8); \
+        mram_write(dstCache, dst, sizeDma + 8); \
     } \
 }
 
