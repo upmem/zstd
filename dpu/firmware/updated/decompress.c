@@ -362,11 +362,11 @@ u32 MRAM_read32(const __mram_ptr void *ptr) {
 
 u64 MRAM_read64(const __mram_ptr void *ptr) { return ((const __mram_ptr unalign64*)ptr)->v; }
 
-size_t MRAM_readST(const __mram_ptr void *ptr) {
+size_t WRAM_readST(const void *ptr) {
     if (MEM_32bits()) {
-        return (size_t)MRAM_read32(ptr);
+        return (size_t)WRAM_read32(ptr);
     } else {
-        return (size_t)MRAM_read64(ptr);
+        return (size_t)WRAM_read64(ptr);
     }
 }
 
@@ -841,7 +841,22 @@ struct BIT_DStream {
     const __mram_ptr char* ptr;
     const __mram_ptr char* start;
     const __mram_ptr char* limitPtr;
+
+    u64 cache[MRAM_CACHE_SIZE / sizeof(u64)];
+    const __mram_ptr char* cacheStart;
 };
+
+static size_t BIT_readST(struct BIT_DStream *bitD) {
+    s32 idx = bitD->ptr - bitD->cacheStart;
+
+    if (unlikely(idx < 0)) {
+        bitD->cacheStart = (const __mram_ptr char*)DMA_ALIGNED((uintptr_t)bitD->ptr - MRAM_CACHE_SIZE + sizeof(bitD->bitContainer));
+        mram_read(bitD->cacheStart, bitD->cache, MRAM_CACHE_SIZE);
+        idx = bitD->ptr - bitD->cacheStart;
+    }
+
+    return WRAM_readST(((char*)bitD->cache) + idx);
+}
 
 typedef enum { BIT_DStream_unfinished = 0,
                BIT_DStream_endOfBuffer = 1,
@@ -871,7 +886,8 @@ static size_t BIT_initDStream(struct BIT_DStream *bitD, const __mram_ptr void *s
     if (srcSize >= sizeof(bitD->bitContainer)) {
         /* normal case */
         bitD->ptr = bitD->start + srcSize - sizeof(bitD->bitContainer);
-        bitD->bitContainer = MRAM_readST(bitD->ptr);
+        bitD->cacheStart = bitD->ptr + 1;  /* dummy value to ensure a MRAM cache reload */
+        bitD->bitContainer = BIT_readST(bitD);
         {
             u8 const lastByte = bitD->start[srcSize-1];
             bitD->bitsConsumed = lastByte ? 8 - BIT_highbit32(lastByte) : 0;  /* ensures bitsConsumed is always set */
@@ -970,7 +986,7 @@ static BIT_DStream_status BIT_reloadDStreamFast(struct BIT_DStream* bitD) {
 #endif
     bitD->ptr -= bitD->bitsConsumed >> 3;
     bitD->bitsConsumed &= 7;
-    bitD->bitContainer = MRAM_readST(bitD->ptr);
+    bitD->bitContainer = BIT_readST(bitD);
     return BIT_DStream_unfinished;
 }
 
@@ -994,7 +1010,7 @@ BIT_DStream_status BIT_reloadDStream(struct BIT_DStream* bitD) {
         }
         bitD->ptr -= nbBytes;
         bitD->bitsConsumed -= nbBytes*8;
-        bitD->bitContainer = MRAM_readST(bitD->ptr);   /* reminder : srcSize > sizeof(bitD->bitContainer), otherwise bitD->ptr == bitD->start */
+        bitD->bitContainer = BIT_readST(bitD);   /* reminder : srcSize > sizeof(bitD->bitContainer), otherwise bitD->ptr == bitD->start */
         return result;
     }
 }
