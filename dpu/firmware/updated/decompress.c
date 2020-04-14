@@ -1367,9 +1367,52 @@ static u8 HUF_decodeSymbolX1(struct BIT_DStream* Dstream, const __mram_ptr struc
     return c;
 }
 
-// TODO remove softcache
+struct HUF_WriteCache {
+    s32 idx;
+    u64 buffer[MRAM_CACHE_SIZE / sizeof(u64)];
+    char *bufferEnd;
+    __mram_ptr u8 *mramPtr;
+};
+
+static void HUF_initWriteCache(struct HUF_WriteCache *cache, __mram_ptr void *ptr) {
+    u32 off = (uintptr_t)ptr & DMA_OFF_MASK;
+
+    cache->bufferEnd = ((char *)cache->buffer) + MRAM_CACHE_SIZE;
+    cache->mramPtr = ptr;
+    cache->idx = -MRAM_CACHE_SIZE + off;
+
+    if (off != 0) {
+        mram_read(ptr, cache->buffer, DMA_ALIGNED(off));
+    }
+}
+
+static void HUF_storeSymbol(struct HUF_WriteCache *cache, u8 symbol) {
+    cache->mramPtr++;
+    cache->bufferEnd[cache->idx++] = symbol;
+
+    if (cache->idx == 0) {
+        mram_write(cache->buffer, cache->mramPtr - MRAM_CACHE_SIZE, MRAM_CACHE_SIZE);
+        cache->idx = -MRAM_CACHE_SIZE;
+    }
+}
+
+static void HUF_flushWriteCache(struct HUF_WriteCache *cache) {
+    u32 idx = MRAM_CACHE_SIZE + cache->idx;
+    if (idx != 0) {
+        u32 off = idx & DMA_OFF_MASK;
+        if (off != 0) {
+            u64 buffer;
+            mram_read(cache->mramPtr, &buffer, 8);
+            memcpy(((char*)cache->buffer) + idx, ((u8*)&buffer) + off, 8 - off);
+            mram_write(cache->buffer, cache->mramPtr - idx, DMA_ALIGNED(idx));
+        } else {
+            mram_write(cache->buffer, cache->mramPtr - idx, idx);
+        }
+    }
+}
+
 #define HUF_DECODE_SYMBOLX1_0(ptr, DStreamPtr) \
-    *ptr++ = HUF_decodeSymbolX1(DStreamPtr, dt, dtLog)
+    HUF_storeSymbol(ptr, HUF_decodeSymbolX1(DStreamPtr, dt, dtLog))
 
 #define HUF_DECODE_SYMBOLX1_1(ptr, DStreamPtr)  \
     if (MEM_64bits() || (HUF_TABLELOG_MAX<=12)) \
@@ -1379,11 +1422,10 @@ static u8 HUF_decodeSymbolX1(struct BIT_DStream* Dstream, const __mram_ptr struc
     if (MEM_64bits()) \
         HUF_DECODE_SYMBOLX1_0(ptr, DStreamPtr)
 
-static size_t HUF_decodeStreamX1(__mram_ptr u8* p, struct BIT_DStream* const bitDPtr, __mram_ptr u8* const pEnd, const __mram_ptr struct HUF_DEltX1* const dt, const u32 dtLog) {
-    __mram_ptr u8* const pStart = p;
+static void HUF_decodeStreamX1(struct HUF_WriteCache* p, struct BIT_DStream* const bitDPtr, __mram_ptr u8* const pEnd, const __mram_ptr struct HUF_DEltX1* const dt, const u32 dtLog) {
 
     /* up to 4 symbols at a time */
-    while ((BIT_reloadDStream(bitDPtr) == BIT_DStream_unfinished) & (p < pEnd-3)) {
+    while ((BIT_reloadDStream(bitDPtr) == BIT_DStream_unfinished) & (p->mramPtr < pEnd-3)) {
         HUF_DECODE_SYMBOLX1_2(p, bitDPtr);
         HUF_DECODE_SYMBOLX1_1(p, bitDPtr);
         HUF_DECODE_SYMBOLX1_2(p, bitDPtr);
@@ -1392,17 +1434,15 @@ static size_t HUF_decodeStreamX1(__mram_ptr u8* p, struct BIT_DStream* const bit
 
     /* [0-3] symbols remaining */
     if (MEM_32bits()) {
-        while ((BIT_reloadDStream(bitDPtr) == BIT_DStream_unfinished) & (p < pEnd)) {
+        while ((BIT_reloadDStream(bitDPtr) == BIT_DStream_unfinished) & (p->mramPtr < pEnd)) {
             HUF_DECODE_SYMBOLX1_0(p, bitDPtr);
         }
     }
 
     /* no more data to retrieve from bitstream, no need to reload */
-    while (p < pEnd) {
+    while (p->mramPtr < pEnd) {
         HUF_DECODE_SYMBOLX1_0(p, bitDPtr);
     }
-
-    return pEnd - pStart;
 }
 
 static size_t HUF_decompress1XUsingDTable(__mram_ptr void *dst, size_t dstSize, struct MramStream *cSrc, size_t cSrcSize, const __mram_ptr u32 *DTable) {
@@ -1418,7 +1458,10 @@ static size_t HUF_decompress1XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     BIT_initDStream(&bitD, start, cSrcSize);
     streamSetAt(cSrc, start + cSrcSize);
 
-    HUF_decodeStreamX1(op, &bitD, oend, dt, dtLog);
+    struct HUF_WriteCache cache;
+    HUF_initWriteCache(&cache, op);
+    HUF_decodeStreamX1(&cache, &bitD, oend, dt, dtLog);
+    HUF_flushWriteCache(&cache);
 
 #if USE_DEF_GUARDS
     if (unlikely(!BIT_endOfDStream(&bitD))) {
@@ -1481,6 +1524,15 @@ static size_t HUF_decompress4XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     }
 #endif
 
+    struct HUF_WriteCache c1;
+    struct HUF_WriteCache c2;
+    struct HUF_WriteCache c3;
+    struct HUF_WriteCache c4;
+    HUF_initWriteCache(&c1, op1);
+    HUF_initWriteCache(&c2, op2);
+    HUF_initWriteCache(&c3, op3);
+    HUF_initWriteCache(&c4, op4);
+
     BIT_initDStream(&bitD1, istart1, length1);
     BIT_initDStream(&bitD2, istart2, length2);
     BIT_initDStream(&bitD3, istart3, length3);
@@ -1489,22 +1541,22 @@ static size_t HUF_decompress4XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
 
     /* up to 16 symbols per loop (4 symbols per stream) in 64-bit mode */
     for ( ; (endSignal) & (op4 < olimit) ; ) {
-        HUF_DECODE_SYMBOLX1_2(op1, &bitD1);
-        HUF_DECODE_SYMBOLX1_2(op2, &bitD2);
-        HUF_DECODE_SYMBOLX1_2(op3, &bitD3);
-        HUF_DECODE_SYMBOLX1_2(op4, &bitD4);
-        HUF_DECODE_SYMBOLX1_1(op1, &bitD1);
-        HUF_DECODE_SYMBOLX1_1(op2, &bitD2);
-        HUF_DECODE_SYMBOLX1_1(op3, &bitD3);
-        HUF_DECODE_SYMBOLX1_1(op4, &bitD4);
-        HUF_DECODE_SYMBOLX1_2(op1, &bitD1);
-        HUF_DECODE_SYMBOLX1_2(op2, &bitD2);
-        HUF_DECODE_SYMBOLX1_2(op3, &bitD3);
-        HUF_DECODE_SYMBOLX1_2(op4, &bitD4);
-        HUF_DECODE_SYMBOLX1_0(op1, &bitD1);
-        HUF_DECODE_SYMBOLX1_0(op2, &bitD2);
-        HUF_DECODE_SYMBOLX1_0(op3, &bitD3);
-        HUF_DECODE_SYMBOLX1_0(op4, &bitD4);
+        HUF_DECODE_SYMBOLX1_2(&c1, &bitD1);
+        HUF_DECODE_SYMBOLX1_2(&c2, &bitD2);
+        HUF_DECODE_SYMBOLX1_2(&c3, &bitD3);
+        HUF_DECODE_SYMBOLX1_2(&c4, &bitD4);
+        HUF_DECODE_SYMBOLX1_1(&c1, &bitD1);
+        HUF_DECODE_SYMBOLX1_1(&c2, &bitD2);
+        HUF_DECODE_SYMBOLX1_1(&c3, &bitD3);
+        HUF_DECODE_SYMBOLX1_1(&c4, &bitD4);
+        HUF_DECODE_SYMBOLX1_2(&c1, &bitD1);
+        HUF_DECODE_SYMBOLX1_2(&c2, &bitD2);
+        HUF_DECODE_SYMBOLX1_2(&c3, &bitD3);
+        HUF_DECODE_SYMBOLX1_2(&c4, &bitD4);
+        HUF_DECODE_SYMBOLX1_0(&c1, &bitD1);
+        HUF_DECODE_SYMBOLX1_0(&c2, &bitD2);
+        HUF_DECODE_SYMBOLX1_0(&c3, &bitD3);
+        HUF_DECODE_SYMBOLX1_0(&c4, &bitD4);
         endSignal &= BIT_reloadDStreamFast(&bitD1) == BIT_DStream_unfinished;
         endSignal &= BIT_reloadDStreamFast(&bitD2) == BIT_DStream_unfinished;
         endSignal &= BIT_reloadDStreamFast(&bitD3) == BIT_DStream_unfinished;
@@ -1512,10 +1564,15 @@ static size_t HUF_decompress4XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     }
 
     /* finish bitStreams one by one */
-    HUF_decodeStreamX1(op1, &bitD1, opStart2, dt, dtLog);
-    HUF_decodeStreamX1(op2, &bitD2, opStart3, dt, dtLog);
-    HUF_decodeStreamX1(op3, &bitD3, opStart4, dt, dtLog);
-    HUF_decodeStreamX1(op4, &bitD4, oend,     dt, dtLog);
+    HUF_decodeStreamX1(&c1, &bitD1, opStart2, dt, dtLog);
+    HUF_decodeStreamX1(&c2, &bitD2, opStart3, dt, dtLog);
+    HUF_decodeStreamX1(&c3, &bitD3, opStart4, dt, dtLog);
+    HUF_decodeStreamX1(&c4, &bitD4, oend,     dt, dtLog);
+
+    HUF_flushWriteCache(&c1);
+    HUF_flushWriteCache(&c2);
+    HUF_flushWriteCache(&c3);
+    HUF_flushWriteCache(&c4);
 
     /* check */
 #if USE_DEF_GUARDS
