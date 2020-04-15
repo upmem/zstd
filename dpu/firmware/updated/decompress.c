@@ -835,6 +835,8 @@ struct FSE_DState {
     const void *table;
 };
 
+static __dma_aligned char bitDStreamBuffers[NR_TASKLETS][4][MRAM_CACHE_SIZE];
+
 struct BIT_DStream {
     size_t   bitContainer;
     unsigned bitsConsumed;
@@ -842,7 +844,7 @@ struct BIT_DStream {
     const __mram_ptr char* start;
     const __mram_ptr char* limitPtr;
 
-    u64 cache[MRAM_CACHE_SIZE / sizeof(u64)];
+    char *cache;
     const __mram_ptr char* cacheStart;
 };
 
@@ -873,13 +875,14 @@ static const unsigned BIT_mask[] = {
     0x3FFFFFFF, 0x7FFFFFFF}; /* up to 31 bits */
 #define BIT_MASK_SIZE (sizeof(BIT_mask) / sizeof(BIT_mask[0]))
 
-static size_t BIT_initDStream(struct BIT_DStream *bitD, const __mram_ptr void *srcBuffer, size_t srcSize) {
+static size_t BIT_initDStream(struct BIT_DStream *bitD, const __mram_ptr void *srcBuffer, size_t srcSize, char *cache) {
 #if USE_DEF_GUARDS
     if (unlikely(srcSize < 1)) {
         abort();
     }
 #endif
 
+    bitD->cache = cache;
     bitD->start = (__mram_ptr char*)srcBuffer;
     bitD->limitPtr = bitD->start + sizeof(bitD->bitContainer);
 
@@ -1085,7 +1088,7 @@ static size_t FSE_decompress_usingDTable_generic(
 
     /* Init */
     __mram_ptr void* start = (__mram_ptr void*)streamGetMramAddr(cSrc);
-    BIT_initDStream(&bitD, start, cSrcSize);
+    BIT_initDStream(&bitD, start, cSrcSize, bitDStreamBuffers[me()][0]);
     streamSetAt(cSrc, start + cSrcSize);
 
     FSE_initDState(&state1, &bitD, dt);
@@ -1367,16 +1370,19 @@ static u8 HUF_decodeSymbolX1(struct BIT_DStream* Dstream, const __mram_ptr struc
     return c;
 }
 
+static __dma_aligned char writeCacheBuffers[NR_TASKLETS][4][MRAM_CACHE_SIZE];
+
 struct HUF_WriteCache {
     s32 idx;
-    u64 buffer[MRAM_CACHE_SIZE / sizeof(u64)];
+    char *buffer;
     char *bufferEnd;
     __mram_ptr u8 *mramPtr;
 };
 
-static void HUF_initWriteCache(struct HUF_WriteCache *cache, __mram_ptr void *ptr) {
+static void HUF_initWriteCache(struct HUF_WriteCache *cache, __mram_ptr void *ptr, char *buffer) {
     u32 off = (uintptr_t)ptr & DMA_OFF_MASK;
 
+    cache->buffer = buffer;
     cache->bufferEnd = ((char *)cache->buffer) + MRAM_CACHE_SIZE;
     cache->mramPtr = ptr;
     cache->idx = -MRAM_CACHE_SIZE + off;
@@ -1455,11 +1461,11 @@ static size_t HUF_decompress1XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     u32 const dtLog = dtd.tableLog;
 
     __mram_ptr void* start = (__mram_ptr void*)streamGetMramAddr(cSrc);
-    BIT_initDStream(&bitD, start, cSrcSize);
+    BIT_initDStream(&bitD, start, cSrcSize, bitDStreamBuffers[me()][0]);
     streamSetAt(cSrc, start + cSrcSize);
 
     struct HUF_WriteCache cache;
-    HUF_initWriteCache(&cache, op);
+    HUF_initWriteCache(&cache, op, writeCacheBuffers[me()][0]);
     HUF_decodeStreamX1(&cache, &bitD, oend, dt, dtLog);
     HUF_flushWriteCache(&cache);
 
@@ -1528,15 +1534,15 @@ static size_t HUF_decompress4XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     struct HUF_WriteCache c2;
     struct HUF_WriteCache c3;
     struct HUF_WriteCache c4;
-    HUF_initWriteCache(&c1, op1);
-    HUF_initWriteCache(&c2, op2);
-    HUF_initWriteCache(&c3, op3);
-    HUF_initWriteCache(&c4, op4);
+    HUF_initWriteCache(&c1, op1, writeCacheBuffers[me()][0]);
+    HUF_initWriteCache(&c2, op2, writeCacheBuffers[me()][1]);
+    HUF_initWriteCache(&c3, op3, writeCacheBuffers[me()][2]);
+    HUF_initWriteCache(&c4, op4, writeCacheBuffers[me()][3]);
 
-    BIT_initDStream(&bitD1, istart1, length1);
-    BIT_initDStream(&bitD2, istart2, length2);
-    BIT_initDStream(&bitD3, istart3, length3);
-    BIT_initDStream(&bitD4, istart4, length4);
+    BIT_initDStream(&bitD1, istart1, length1, bitDStreamBuffers[me()][0]);
+    BIT_initDStream(&bitD2, istart2, length2, bitDStreamBuffers[me()][1]);
+    BIT_initDStream(&bitD3, istart3, length3, bitDStreamBuffers[me()][2]);
+    BIT_initDStream(&bitD4, istart4, length4, bitDStreamBuffers[me()][3]);
     streamSetAt(cSrc, istart + cSrcSize);
 
     /* up to 16 symbols per loop (4 symbols per stream) in 64-bit mode */
@@ -2397,7 +2403,7 @@ static size_t decompressSequences(struct FrameContext *ctx, __mram_ptr void *dst
             seqState.prevOffset[i] = ctx->entropy.rep[i];
         }
 
-        BIT_initDStream(&seqState.DStream, imram, iend-imram);
+        BIT_initDStream(&seqState.DStream, imram, iend-imram, bitDStreamBuffers[me()][0]);
         streamSetAt(seqStart, iend);
 
         initFseState(&seqState.stateLL, &seqState.DStream, ctx->LLTptr);
