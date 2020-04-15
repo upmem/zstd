@@ -370,7 +370,7 @@ size_t WRAM_readST(const void *ptr) {
     }
 }
 
-#define MRAM_CACHE_SIZE 32
+#define MRAM_CACHE_SIZE 64
 
 static __dma_aligned u8 mramReadCache[NR_TASKLETS][MRAM_CACHE_SIZE];
 static __dma_aligned u8 mramWriteCache[NR_TASKLETS][MRAM_CACHE_SIZE];

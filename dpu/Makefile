@@ -1,6 +1,6 @@
 .PHONY: default all host dpu clean
 
-NR_TASKLETS ?= 13
+NR_TASKLETS ?= 12
 DPU_DIR=firmware/updated
 
 #NR_TASKLETS ?= 15
