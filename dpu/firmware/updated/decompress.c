@@ -297,11 +297,13 @@ struct EntropyTables {
     u32 rep[ZSTD_REP_NUM];
 };
 
+static u32 frameContextWorkspaces[NR_TASKLETS][HUF_DECOMPRESS_WORKSPACE_SIZE_U32];
+
 struct FrameContext {
     struct FrameHeader *header;
     struct EntropyTables entropy;
 
-    u32 workspace[HUF_DECOMPRESS_WORKSPACE_SIZE_U32];
+    u32 *workspace;
 
     const __mram_ptr void* prefixStart;
     const __mram_ptr void* virtualStart;
@@ -2498,6 +2500,7 @@ static size_t decompress(__mram_ptr void *dst, size_t dstCapacity, __mram_ptr co
     streamInit(&istream, src);
 
     struct FrameContext ctx;
+    ctx.workspace = frameContextWorkspaces[id];
     ctx.litBuffer = litStorage[id];
     ctx.entropy.LLTable = LLTableStorage[id];
     ctx.entropy.OFTable = OFTableStorage[id];
