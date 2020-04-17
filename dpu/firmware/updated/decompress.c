@@ -372,7 +372,7 @@ size_t WRAM_readST(const void *ptr) {
     }
 }
 
-#define MRAM_CACHE_SIZE 64
+#define MRAM_CACHE_SIZE 32
 
 static __dma_aligned u8 mramReadCache[NR_TASKLETS][MRAM_CACHE_SIZE];
 static __dma_aligned u8 mramWriteCache[NR_TASKLETS][MRAM_CACHE_SIZE];
@@ -837,7 +837,9 @@ struct FSE_DState {
     const void *table;
 };
 
-static __dma_aligned char bitDStreamBuffers[NR_TASKLETS][4][MRAM_CACHE_SIZE];
+#define MRAM_STREAM_CACHE_SIZE 64
+
+static __dma_aligned char bitDStreamBuffers[NR_TASKLETS][4][MRAM_STREAM_CACHE_SIZE];
 
 struct BIT_DStream {
     size_t   bitContainer;
@@ -854,8 +856,8 @@ static size_t BIT_readST(struct BIT_DStream *bitD) {
     s32 idx = bitD->ptr - bitD->cacheStart;
 
     if (unlikely(idx < 0)) {
-        bitD->cacheStart = (const __mram_ptr char*)DMA_ALIGNED((uintptr_t)bitD->ptr - MRAM_CACHE_SIZE + sizeof(bitD->bitContainer));
-        mram_read(bitD->cacheStart, bitD->cache, MRAM_CACHE_SIZE);
+        bitD->cacheStart = (const __mram_ptr char*)DMA_ALIGNED((uintptr_t)bitD->ptr - MRAM_STREAM_CACHE_SIZE + sizeof(bitD->bitContainer));
+        mram_read(bitD->cacheStart, bitD->cache, MRAM_STREAM_CACHE_SIZE);
         idx = bitD->ptr - bitD->cacheStart;
     }
 
@@ -2192,7 +2194,7 @@ static void wildcopy(__mram_ptr void *dst, const __mram_ptr void *src, ptrdiff_t
         do {
             COPY8(op, ip);
         } while (op < oend);
-    } else if (diff >= MRAM_CACHE_SIZE) {
+    } else if (diff >= 2 * MRAM_CACHE_SIZE) {
         MRAM_memcpy(op, ip, length);
     } else {
         COPY16(op, ip);
