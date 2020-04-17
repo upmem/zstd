@@ -2192,6 +2192,8 @@ static void wildcopy(__mram_ptr void *dst, const __mram_ptr void *src, ptrdiff_t
         do {
             COPY8(op, ip);
         } while (op < oend);
+    } else if (diff >= MRAM_CACHE_SIZE) {
+        MRAM_memcpy(op, ip, length);
     } else {
         COPY16(op, ip);
         COPY16(op, ip);
