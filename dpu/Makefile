@@ -1,10 +1,12 @@
 .PHONY: default all host dpu clean
 
+ifeq ($(DPU_SIMPLE),1)
+NR_TASKLETS ?= 15
+DPU_DIR = firmware/simple
+else
 NR_TASKLETS ?= 12
-DPU_DIR=firmware/updated
-
-#NR_TASKLETS ?= 15
-#DPU_DIR=firmware/simple
+DPU_DIR = firmware/lib
+endif
 
 default: all
 
