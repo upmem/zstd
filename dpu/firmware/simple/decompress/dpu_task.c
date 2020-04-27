@@ -19,13 +19,14 @@ __host uint64_t cycles[NR_TASKLETS];
 __mram_noinit uint8_t input[NR_TASKLETS][INPUT_SIZE];
 __mram_noinit uint8_t output[NR_TASKLETS][OUTPUT_SIZE];
 
-int main() {
-  uint8_t id = me();
-  if (id == 0) {
-    perfcounter_config(COUNT_CYCLES, true);
-  }
-  resultSize[id] = decompress(output[id], OUTPUT_SIZE, input[id], inputSize[id]);
-  cycles[id] = perfcounter_get();
+int main()
+{
+    uint8_t id = me();
+    if (id == 0) {
+        perfcounter_config(COUNT_CYCLES, true);
+    }
+    resultSize[id] = decompress(output[id], OUTPUT_SIZE, input[id], inputSize[id]);
+    cycles[id] = perfcounter_get();
 
-  return 0;
+    return 0;
 }

@@ -259,7 +259,7 @@ static __attribute__((noinline)) u64 read_bits_LE(const mram(u8 *) src, const i3
     }
 
     uint64_t *cache = (uint64_t *)read_cache[me()];
-    uintptr_t cache_aligned_src_ptr = ((uintptr_t) src) & ~(MRAM_READ_CACHE_SIZE - 1);
+    uintptr_t cache_aligned_src_ptr = ((uintptr_t)src) & ~(MRAM_READ_CACHE_SIZE - 1);
     if (unlikely(cache_aligned_src_ptr != read_cache_ptr[me()])) {
         mram_read(src, cache, MRAM_READ_CACHE_SIZE);
         read_cache_ptr[me()] = cache_aligned_src_ptr;
@@ -341,12 +341,12 @@ static inline u8 MRAM_read_byte(mram_istream_t *const in)
     const mram(u8 *) src = MRAM_get_read_ptr(in, 1);
 
     uint8_t *cache = read_cache[me()];
-    uintptr_t cache_aligned_src_ptr = ((uintptr_t) src) & ~(MRAM_READ_CACHE_SIZE - 1);
+    uintptr_t cache_aligned_src_ptr = ((uintptr_t)src) & ~(MRAM_READ_CACHE_SIZE - 1);
     if (unlikely(cache_aligned_src_ptr != read_cache_ptr[me()])) {
         mram_read(src, cache, MRAM_READ_CACHE_SIZE);
         read_cache_ptr[me()] = cache_aligned_src_ptr;
     }
-    size_t cache_offset = ((uintptr_t) src) & (MRAM_READ_CACHE_SIZE - 1);
+    size_t cache_offset = ((uintptr_t)src) & (MRAM_READ_CACHE_SIZE - 1);
 
     return cache[cache_offset];
 }
@@ -476,8 +476,10 @@ static size_t decode_literals_compressed(frame_context_t *const ctx, mram_istrea
     const block_type_t block_type, const u8 size_format);
 static void decode_huf_table(HUF_dtable_t *const dtable, mram_istream_t *const in);
 static void fse_decode_hufweights(u8 *weights, mram_istream_t *const in, u8 *const num_symbs);
-static void FSE_decode_header(FSE_dtable_t *const dtable, mram_istream_t *const in, const u8 max_accuracy_log, const u8 fse_table_idx);
-static void FSE_init_dtable(FSE_dtable_t *const dtable, const i16 *const norm_freqs, const u8 num_symbs, const u8 accuracy_log, const u8 fse_table_idx);
+static void FSE_decode_header(
+    FSE_dtable_t *const dtable, mram_istream_t *const in, const u8 max_accuracy_log, const u8 fse_table_idx);
+static void FSE_init_dtable(
+    FSE_dtable_t *const dtable, const i16 *const norm_freqs, const u8 num_symbs, const u8 accuracy_log, const u8 fse_table_idx);
 static void FSE_init_dtable_rle(FSE_dtable_t *const dtable, const u8 symb, const u8 fse_table_idx);
 static size_t FSE_decompress_interleaved2(const FSE_dtable_t *const dtable, u8 *const out, mram_istream_t *const in);
 static inline void FSE_init_state(
@@ -499,7 +501,8 @@ static size_t HUF_decompress_4stream(const HUF_dtable_t *const dtable, mram_ostr
 static size_t decode_num_sequences(mram_istream_t *in);
 static const mram(u8 *)
     init_sequences(frame_context_t *const ctx, mram_istream_t *in, sequence_states_t *states, i32 *bit_offset);
-static void decode_seq_table(FSE_dtable_t *const table, mram_istream_t *const in, const seq_part_t type, const seq_mode_t mode, const u8 fse_table_idx);
+static void decode_seq_table(
+    FSE_dtable_t *const table, mram_istream_t *const in, const seq_part_t type, const seq_mode_t mode, const u8 fse_table_idx);
 static void decode_sequence(
     sequence_states_t *const states, const mram(u8 *const) src, i32 *const offset, sequence_command_t *const seq);
 static void execute_sequence(frame_context_t *const ctx, mram_ostream_t *const out, mram_istream_t *litstream,
@@ -511,8 +514,7 @@ static void execute_match_copy(
 
 dictionary_t dict = {};
 
-size_t decompress(
-    mram(void *const) dst, const size_t dst_len, const mram(void *const) src, const size_t src_len)
+size_t decompress(mram(void *const) dst, const size_t dst_len, const mram(void *const) src, const size_t src_len)
 {
     mram_istream_t in = MRAM_make_istream(src, src_len);
     mram_ostream_t out = MRAM_make_ostream(dst, dst_len);
@@ -531,7 +533,7 @@ static void decode_frame(mram_ostream_t *const out, mram_istream_t *const in, co
         ERROR(INVALID_MAGIC);
     }
 #else
-    (void) magic_number;
+    (void)magic_number;
 #endif
 
     frame_context_t ctx;
@@ -851,14 +853,15 @@ static void fse_decode_hufweights(u8 *weights, mram_istream_t *const in, u8 *con
     *num_symbs = FSE_decompress_interleaved2(&dtable, weights, in);
 }
 
-static void FSE_decode_header(FSE_dtable_t *const dtable, mram_istream_t *const in, const u8 max_accuracy_log, const u8 fse_table_idx)
+static void FSE_decode_header(
+    FSE_dtable_t *const dtable, mram_istream_t *const in, const u8 max_accuracy_log, const u8 fse_table_idx)
 {
 #if USE_DEF_GUARDS
     if (unlikely(max_accuracy_log > FSE_MAX_ACCURACY_LOG)) {
         ERROR(FSE_ACCURACY_TOO_LARGE);
     }
 #else
-    (void) max_accuracy_log;
+    (void)max_accuracy_log;
 #endif
     const u8 accuracy_log = 5 + MRAM_read_bits(in, 4);
 #if USE_DEF_GUARDS
@@ -910,7 +913,8 @@ static void FSE_decode_header(FSE_dtable_t *const dtable, mram_istream_t *const 
     FSE_init_dtable(dtable, frequencies, symb, accuracy_log, fse_table_idx);
 }
 
-static void FSE_init_dtable(FSE_dtable_t *const dtable, const i16 *const norm_freqs, const u8 num_symbs, const u8 accuracy_log, const u8 fse_table_idx)
+static void FSE_init_dtable(
+    FSE_dtable_t *const dtable, const i16 *const norm_freqs, const u8 num_symbs, const u8 accuracy_log, const u8 fse_table_idx)
 {
     dtable->accuracy_log = accuracy_log;
     // TODO remove softcache
@@ -1289,7 +1293,8 @@ static const mram(u8 *) init_sequences(frame_context_t *const ctx, mram_istream_
     return src;
 }
 
-static void decode_seq_table(FSE_dtable_t *const table, mram_istream_t *const in, const seq_part_t type, const seq_mode_t mode, const u8 fse_table_idx)
+static void decode_seq_table(
+    FSE_dtable_t *const table, mram_istream_t *const in, const seq_part_t type, const seq_mode_t mode, const u8 fse_table_idx)
 {
     const i16 *const default_distributions[]
         = { SEQ_LITERAL_LENGTH_DEFAULT_DIST, SEQ_OFFSET_DEFAULT_DIST, SEQ_MATCH_LENGTH_DEFAULT_DIST };

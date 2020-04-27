@@ -5,5 +5,4 @@
 
 struct dictionary_t;
 
-size_t decompress(
-    mram(void *const) dst, const size_t dst_len, const mram(void *const) src, const size_t src_len);
+size_t decompress(mram(void *const) dst, const size_t dst_len, const mram(void *const) src, const size_t src_len);
