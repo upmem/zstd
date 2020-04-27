@@ -837,7 +837,7 @@ struct FSE_DState {
     const void *table;
 };
 
-#define MRAM_STREAM_CACHE_SIZE 64
+#define MRAM_STREAM_CACHE_SIZE 96
 
 static __dma_aligned char bitDStreamBuffers[NR_TASKLETS][4][MRAM_STREAM_CACHE_SIZE];
 
@@ -1367,49 +1367,20 @@ static size_t HUF_readTableX1(__mram_ptr u32 *DTable, struct MramStream *src, si
     return iSize;
 }
 
-#define HUF_CACHE_SIZE 16
-static __dma_aligned u8 HUF_DEltCacheBuffers[NR_TASKLETS][HUF_CACHE_SIZE];
-
-struct HUF_DEltX1_Cache {
-    __mram_ptr void* data;
-    size_t off;
-    u8* cache;
-};
-
-static void initDEltX1_Cache(struct HUF_DEltX1_Cache *dt, const __mram_ptr struct HUF_DEltX1 *const data) {
-    dt->data = (__mram_ptr void*) data;
-    dt->cache = HUF_DEltCacheBuffers[me()];
-    dt->off = -((uintptr_t)data & DMA_ALIGNMENT);
-    mram_read(dt->data, dt->cache, HUF_CACHE_SIZE);
-}
-
-static struct HUF_DEltX1 fetchDElt(struct HUF_DEltX1_Cache *dt, size_t idx) {
-    struct HUF_DEltX1 result;
+static struct HUF_DEltX1 fetchDElt(const __mram_ptr struct HUF_DEltX1 *const dt, size_t idx) {
+    u64 buffer;
+    u8 *cache = (u8*)&buffer;
+    __mram_ptr void *data = (__mram_ptr void*) dt;
 
     size_t off = idx * sizeof(struct HUF_DEltX1);
-    size_t cacheOff = off - dt->off;
+    size_t dtoff = ((uintptr_t)(data + off) & ~DMA_OFF_MASK) - (uintptr_t)data;
+    size_t cacheOff = off - dtoff;
+    mram_read(data + dtoff, cache, sizeof(buffer));
 
-    if (unlikely(cacheOff == (HUF_CACHE_SIZE - 1))) {
-        result.byte = dt->cache[cacheOff];
-
-        dt->off = off + 1;
-        mram_read(dt->data + dt->off, dt->cache, HUF_CACHE_SIZE);
-
-        result.nbBits = dt->cache[0];
-    } else {
-        if (likely(cacheOff >= HUF_CACHE_SIZE)) {
-            dt->off = ((uintptr_t)(dt->data + off) & ~DMA_OFF_MASK) - (uintptr_t)dt->data;
-            cacheOff = off - dt->off;
-            mram_read(dt->data + dt->off, dt->cache, HUF_CACHE_SIZE);
-        }
-
-        result = *((struct HUF_DEltX1 *)(dt->cache + cacheOff));
-    }
-
-    return result;
+    return *((struct HUF_DEltX1 *)(cache + cacheOff));
 }
 
-static u8 HUF_decodeSymbolX1(struct BIT_DStream* Dstream, struct HUF_DEltX1_Cache* dt, const u32 dtLog) {
+static u8 HUF_decodeSymbolX1(struct BIT_DStream* Dstream, const __mram_ptr struct HUF_DEltX1 *const dt, const u32 dtLog) {
     size_t const val = BIT_lookBitsFast(Dstream, dtLog); /* note : dtLog >= 1 */
     struct HUF_DEltX1 dtVal = fetchDElt(dt, val);
     u8 const c = dtVal.byte;
@@ -1475,7 +1446,7 @@ static void HUF_flushWriteCache(struct HUF_WriteCache *cache) {
     if (MEM_64bits()) \
         HUF_DECODE_SYMBOLX1_0(ptr, DStreamPtr)
 
-static void HUF_decodeStreamX1(struct HUF_WriteCache* p, struct BIT_DStream* const bitDPtr, __mram_ptr u8* const pEnd, struct HUF_DEltX1_Cache *dt, const u32 dtLog) {
+static void HUF_decodeStreamX1(struct HUF_WriteCache* p, struct BIT_DStream* const bitDPtr, __mram_ptr u8* const pEnd, const __mram_ptr struct HUF_DEltX1 *const dt, const u32 dtLog) {
 
     /* up to 4 symbols at a time */
     while ((BIT_reloadDStream(bitDPtr) == BIT_DStream_unfinished) & (p->mramPtr < pEnd-3)) {
@@ -1502,14 +1473,10 @@ static size_t HUF_decompress1XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     __mram_ptr u8* op = dst;
     __mram_ptr u8* oend = op + dstSize;
     const __mram_ptr void* dtPtr = DTable + 1;
-    const __mram_ptr struct HUF_DEltX1 *const data = (__mram_ptr struct HUF_DEltX1 *)dtPtr;
+    const __mram_ptr struct HUF_DEltX1 *const dt = (__mram_ptr struct HUF_DEltX1 *)dtPtr;
     struct BIT_DStream bitD;
     struct DTableDesc const dtd = HUF_getDTableDesc(DTable);
     u32 const dtLog = dtd.tableLog;
-
-    struct HUF_DEltX1_Cache dtStruct;
-    struct HUF_DEltX1_Cache *dt = &dtStruct;
-    initDEltX1_Cache(dt, data);
 
     __mram_ptr void* start = (__mram_ptr void*)streamGetMramAddr(cSrc);
     BIT_initDStream(&bitD, start, cSrcSize, bitDStreamBuffers[me()][0]);
@@ -1543,13 +1510,9 @@ static size_t HUF_decompress4XUsingDTable(__mram_ptr void *dst, size_t dstSize, 
     __mram_ptr u8 *const oend = ostart + dstSize;
     __mram_ptr u8 *const olimit = oend - 3;
     const __mram_ptr void* const dtPtr = DTable + 1;
-    const __mram_ptr struct HUF_DEltX1* const data = (const __mram_ptr struct HUF_DEltX1*)dtPtr;
+    const __mram_ptr struct HUF_DEltX1* const dt = (const __mram_ptr struct HUF_DEltX1*)dtPtr;
 
    /* Init */
-    struct HUF_DEltX1_Cache dtStruct;
-    struct HUF_DEltX1_Cache *dt = &dtStruct;
-    initDEltX1_Cache(dt, data);
-
     struct BIT_DStream bitD1;
     struct BIT_DStream bitD2;
     struct BIT_DStream bitD3;

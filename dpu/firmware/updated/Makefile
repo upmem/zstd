@@ -1,7 +1,7 @@
 CC           = clang
 NR_TASKLETS ?= 1
 USE_DEF_GUARDS ?= 0
-CFLAGS       = --target=dpu-upmem-dpurte -Os -Wall -Wextra -Werror -DNR_TASKLETS=$(NR_TASKLETS) -DSTACK_SIZE_DEFAULT=2056 -DUSE_DEF_GUARDS=$(USE_DEF_GUARDS)
+CFLAGS       = --target=dpu-upmem-dpurte -Os -Wall -Wextra -Werror -DNR_TASKLETS=$(NR_TASKLETS) -DSTACK_SIZE_DEFAULT=2096 -DUSE_DEF_GUARDS=$(USE_DEF_GUARDS)
 
 DECOMPRESS_SOURCES  = decompress.c
 DECOMPRESS_INCLUDES =
