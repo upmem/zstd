@@ -1,6 +1,6 @@
 # ZSTD on DPU
 
-Port of ZSTD for a DPU-based solution.
+Port of ZSTD decompressor for a DPU-based solution.
 
 ## Contents
 
@@ -9,7 +9,7 @@ Port of ZSTD for a DPU-based solution.
  - `firmware/simple` contains an implementation based on the educational decoder
  - `firmware/lib` contains an implementation based on the ZSTD library code
 
-`host_decompress.c` contains a host harnest, decompressing the input file on the DPUs.
+`host_decompress.c` contains a host harness, decompressing the input file on the DPUs.
 
 Currently, the compression must be done with the host `zstd`.
 
@@ -20,9 +20,13 @@ Setting `DPU_SIMPLE=1` will use the simple implementation instead of the standar
 
 ## Performance
 
-A DPU decompressing 12 files, of 1028152 bytes each, in 921253408 DPU cycles.
-Thus, using a standard DPU frequency of 267MHz, each DPU as a decompression throughput of 3.58 MB/s.
-On a standard system (1024 DPUs), this represents a throughput of 3.58 GB/s.
+A DPU can decompress 12 files in parallel. A standard system can contain 1024 DPUs.
+The assumed DPU frequency is 267MHz.
+
+| File type  | File size      | DPU duration      | DPU throughput @267MHz | System throughput |
+| ---------- | -------------- | ----------------- | ---------------------- | ----------------- |
+| Executable | 1028152 B each | 921253408  cycles | 3.58 MB/s              | 3.58 GB/s         |
+| Executable | 1660152 B each | 1250792384 cycles | 4.25 MB/s              | 4.25 GB/s         |
 
 ## Notes
 
