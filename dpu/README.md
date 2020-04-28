@@ -27,7 +27,7 @@ A DPU can decompress 12 files in parallel.
 | Executable | 1028152 B each | 921253408  cycles | 3.58 MB/s              | 3.58 GB/s         |
 | Executable | 1660152 B each | 1250792384 cycles | 4.25 MB/s              | 4.25 GB/s         |
 
- The figures are for a 1204-DPU system.
+ The figures are for a 1024-DPU system.
  
 ## Notes
 
