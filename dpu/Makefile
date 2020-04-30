@@ -23,7 +23,6 @@ host: decompress
 
 CFLAGS = -O3 -g -Wall -Wextra -Werror
 DPU_OPTS = `dpu-pkg-config --cflags --libs dpu` -DNR_TASKLETS=$(NR_TASKLETS)
-ZSTD_OPTS = -I../lib/ -L../lib/ -lzstd
 
 decompress: host_decompress.c
-	$(CC) $^ $(CFLAGS) $(DPU_OPTS) $(ZSTD_OPTS) -DDPU_DECOMPRESS_PROGRAM=\"$(DPU_DIR)/decompress.dpu\" -o $@
+	$(CC) $^ $(CFLAGS) $(DPU_OPTS) -DDPU_DECOMPRESS_PROGRAM=\"$(DPU_DIR)/decompress.dpu\" -o $@

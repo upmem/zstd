@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <zstd.h>
 
 #ifndef DPU_DECOMPRESS_PROGRAM
 #error DPU_DECOMPRESS_PROGRAM is not defined
