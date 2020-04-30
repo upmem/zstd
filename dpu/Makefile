@@ -21,7 +21,7 @@ dpu:
 
 host: decompress
 
-CFLAGS = -O3 -g -Wall -Wextra -Werror
+CFLAGS = -O3 -g -Wall -Wextra -Werror -std=c99
 DPU_OPTS = `dpu-pkg-config --cflags --libs dpu` -DNR_TASKLETS=$(NR_TASKLETS)
 
 decompress: host_decompress.c
